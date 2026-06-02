@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Oh My Factory — PoC 프로젝트 기획서</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --bg-elev: #ffffff;
+    --ink: #0f172a;
+    --ink-2: #334155;
+    --ink-3: #64748b;
+    --line: #e2e8f0;
+    --line-2: #cbd5e1;
+    --brand: #1d4ed8;
+    --brand-2: #2563eb;
+    --brand-soft: #eff6ff;
+    --good: #059669;
+    --good-soft: #ecfdf5;
+    --warn: #d97706;
+    --warn-soft: #fffbeb;
+    --bad: #dc2626;
+    --bad-soft: #fef2f2;
+    --accent: #7c3aed;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  .narrow { max-width: 820px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--brand); }
+
+  /* ─── Nav ─── */
+  nav.topbar {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav.topbar .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; max-width: 1100px; margin: 0 auto;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; color: var(--ink); }
+  .brand .dot { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--brand), var(--accent)); display: grid; place-items: center; color: white; font-size: 15px; }
+  .nav-links { display: flex; gap: 22px; font-size: 14px; }
+  .nav-links a { color: var(--ink-3); text-decoration: none; font-weight: 500; transition: color .15s; }
+  .nav-links a:hover { color: var(--brand); }
+  .pill { font-size: 12px; padding: 4px 11px; background: var(--brand-soft); color: var(--brand); border-radius: 999px; font-weight: 600; }
+  @media (max-width: 720px) { .nav-links { display: none; } }
+
+  /* ─── Hero ─── */
+  .hero { padding: 88px 0 72px; text-align: center; }
+  .hero .eyebrow { font-size: 13px; font-weight: 600; color: var(--brand); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 20px; }
+  .hero h1 {
+    font-size: clamp(38px, 6vw, 64px);
+    line-height: 1.12;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 22px;
+    color: var(--ink);
+  }
+  .hero h1 .accent { background: linear-gradient(120deg, var(--brand) 0%, var(--accent) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.sub { font-size: 19px; color: var(--ink-3); max-width: 660px; margin: 0 auto 30px; line-height: 1.7; }
+  .hero .tags { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .tag { font-size: 13px; padding: 7px 14px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-weight: 600; }
+
+  /* ─── Section ─── */
+  section.block { padding: 72px 0; border-top: 1px solid var(--line); }
+  .section-eyebrow { font-size: 12px; font-weight: 700; color: var(--brand); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; }
+  .section-title { font-size: clamp(26px, 4vw, 34px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 14px; color: var(--ink); }
+  .section-lead { font-size: 17px; color: var(--ink-3); margin: 0 0 8px; max-width: 760px; line-height: 1.8; }
+
+  /* ─── Cards ─── */
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--line);
+    border-radius: 16px; padding: 28px 30px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  }
+  .card + .card { margin-top: 20px; }
+  .card h3 { font-size: 19px; font-weight: 700; margin: 0 0 10px; color: var(--ink); }
+  .card p { font-size: 15.5px; color: var(--ink-2); margin: 0 0 12px; line-height: 1.8; }
+  .card p:last-child { margin-bottom: 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 760px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  /* ─── Overview meta rows ─── */
+  .meta-list { display: grid; gap: 0; }
+  .meta-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .meta-row:last-child { border-bottom: none; }
+  .meta-row .k { font-weight: 700; color: var(--ink-3); font-size: 14px; }
+  .meta-row .v { font-size: 15.5px; color: var(--ink-2); line-height: 1.8; }
+  @media (max-width: 600px) { .meta-row { grid-template-columns: 1fr; gap: 4px; } }
+
+  /* ─── Stat band ─── */
+  .stat-band { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 28px; }
+  .stat { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
+  .stat .num { font-size: 30px; font-weight: 800; color: var(--brand); letter-spacing: -0.02em; }
+  .stat .lbl { font-size: 13.5px; color: var(--ink-3); margin-top: 6px; font-weight: 500; }
+  @media (max-width: 760px) { .stat-band { grid-template-columns: 1fr; } }
+
+  /* ─── Phase / step ─── */
+  .phase { position: relative; padding-left: 0; }
+  .phase-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .phase-no { width: 44px; height: 44px; flex: none; border-radius: 12px; background: linear-gradient(135deg, var(--brand), var(--accent)); color: white; font-weight: 800; font-size: 18px; display: grid; place-items: center; }
+  .phase-head .ttl { font-size: 21px; font-weight: 800; color: var(--ink); }
+  .phase-head .dur { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .badge { font-size: 12.5px; padding: 4px 11px; border-radius: 999px; font-weight: 600; }
+  .badge.dur { background: var(--brand-soft); color: var(--brand); }
+  .badge.ppl { background: var(--good-soft); color: var(--good); }
+
+  /* ─── Data type blocks ─── */
+  .dt-group { margin-top: 22px; }
+  .dt-group > h4 { font-size: 16px; font-weight: 700; color: var(--ink); margin: 0 0 14px; display: flex; align-items: center; gap: 9px; }
+  .dt-group > h4 .ix { width: 24px; height: 24px; border-radius: 7px; background: var(--brand-soft); color: var(--brand); font-size: 13px; font-weight: 800; display: grid; place-items: center; }
+  .subcard { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; background: #fcfdfe; }
+  .subcard + .subcard { margin-top: 12px; }
+  .subcard .st { font-weight: 700; font-size: 15px; color: var(--ink); margin-bottom: 6px; }
+  .subcard .desc { font-size: 14px; color: var(--ink-3); margin-bottom: 10px; }
+  .fields { display: flex; flex-wrap: wrap; gap: 7px; }
+  .field { font-size: 12.5px; padding: 4px 10px; background: white; border: 1px solid var(--line-2); border-radius: 7px; color: var(--ink-2); font-weight: 500; }
+
+  /* ─── Callout ─── */
+  .callout { border-left: 3px solid var(--accent); background: #faf8ff; border-radius: 0 12px 12px 0; padding: 18px 22px; margin-top: 20px; }
+  .callout .ct { font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 8px; display: flex; align-items: center; gap: 7px; }
+  .callout p { font-size: 14.5px; color: var(--ink-2); margin: 0; line-height: 1.85; }
+
+  /* ─── Preprocess steps ─── */
+  .pp-list { display: grid; gap: 14px; margin-top: 6px; }
+  .pp-item { display: grid; grid-template-columns: 36px 1fr; gap: 14px; align-items: start; }
+  .pp-item .n { width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: white; font-weight: 700; font-size: 14px; display: grid; place-items: center; margin-top: 2px; }
+  .pp-item .b .t { font-weight: 700; font-size: 15.5px; color: var(--ink); }
+  .pp-item .b .d { font-size: 14px; color: var(--ink-3); margin-top: 3px; line-height: 1.7; }
+  .pp-item .b .ex { font-size: 13px; color: var(--brand); background: var(--brand-soft); display: inline-block; padding: 3px 9px; border-radius: 6px; margin-top: 8px; }
+
+  /* ─── Gantt ─── */
+  .gantt { margin-top: 8px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--bg-elev); }
+  .gantt-row { display: grid; grid-template-columns: 220px 1fr; border-bottom: 1px solid var(--line); }
+  .gantt-row:last-child { border-bottom: none; }
+  .gantt-row.head { background: #fafbfd; font-size: 12px; font-weight: 700; color: var(--ink-3); }
+  .gantt-label { padding: 14px 18px; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; }
+  .gantt-label .pn { font-weight: 700; font-size: 14.5px; color: var(--ink); }
+  .gantt-label .pp { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .gantt-weeks { display: grid; grid-template-columns: repeat(7, 1fr); position: relative; }
+  .gantt-weeks .wk { border-right: 1px dashed var(--line); padding: 10px 0; text-align: center; font-size: 11.5px; color: var(--ink-3); }
+  .gantt-weeks .wk:last-child { border-right: none; }
+  .bar-wrap { position: relative; grid-column: 1 / -1; height: 100%; }
+  .bar { position: absolute; top: 50%; transform: translateY(-50%); height: 22px; border-radius: 7px; display: flex; align-items: center; padding: 0 10px; font-size: 11.5px; font-weight: 700; color: white; white-space: nowrap; }
+  .bar.b1 { background: linear-gradient(90deg, var(--brand), var(--brand-2)); }
+  .bar.b2 { background: linear-gradient(90deg, var(--accent), #9333ea); }
+  .bar.b3 { background: linear-gradient(90deg, #0891b2, #06b6d4); }
+  @media (max-width: 720px) { .gantt-row { grid-template-columns: 130px 1fr; } .gantt-label { padding: 10px 12px; } .bar { font-size: 0; } }
+
+  /* ─── Mgmt rules ─── */
+  .rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+  @media (max-width: 700px) { .rule-grid { grid-template-columns: 1fr; } }
+  .rule { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; background: #fcfdfe; }
+  .rule .rh { font-weight: 700; font-size: 15px; color: var(--ink); margin-bottom: 6px; }
+  .rule .rd { font-size: 13.5px; color: var(--ink-3); line-height: 1.7; }
+
+  ul.clean { margin: 8px 0 0; padding-left: 0; list-style: none; }
+  ul.clean li { position: relative; padding-left: 22px; font-size: 15px; color: var(--ink-2); margin-bottom: 9px; line-height: 1.7; }
+  ul.clean li::before { content: ""; position: absolute; left: 4px; top: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+
+  /* ─── Footer ─── */
+  footer { border-top: 1px solid var(--line); padding: 40px 0 60px; text-align: center; color: var(--ink-3); font-size: 13px; }
+  .draft-note { background: var(--warn-soft); border: 1px solid #fde68a; color: #92400e; font-size: 13px; padding: 10px 16px; border-radius: 10px; display: inline-block; margin-bottom: 24px; }
+</style>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="row">
+    <div class="brand"><span class="dot">⚙</span> Oh My Factory</div>
+    <div class="nav-links">
+      <a href="#overview">프로젝트 개요</a>
+      <a href="#process">진행 절차</a>
+      <a href="#phase1">데이터</a>
+      <a href="#phase2">Agent</a>
+      <a href="#phase3">MAS</a>
+    </div>
+    <span class="pill">PoC 기획서 · v1 (draft)</span>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="narrow">
+    <div class="eyebrow">Multi-Agent Smart Factory · Proof of Concept</div>
+    <h1>Oh My Factory<br /><span class="accent">데이터로 결정하는 스마트 제조</span></h1>
+    <p class="sub">Multi-Agent 시스템으로 실시간 데이터 수집부터 상황 인지, 생산 전략 계획, 경영 의사결정 지원까지 — 제조·생산 비용을 최소화하고 데이터 근거 기반의 빠르고 정확한 의사결정 환경을 구축합니다.</p>
+    <div class="tags">
+      <span class="tag">🏭 테스트베드 · 삼진엘앤디</span>
+      <span class="tag">🧩 플라스틱 사출 제조</span>
+      <span class="tag">📊 생산 제조 최적화</span>
+    </div>
+  </div>
+</header>
+
+<!-- OVERVIEW -->
+<section class="block" id="overview">
+  <div class="narrow">
+    <div class="section-eyebrow">01 — Overview</div>
+    <h2 class="section-title">프로젝트 개요</h2>
+    <p class="section-lead">Multi-Agent를 이용한 스마트 제조 공장 환경을 구축합니다. 스마트 공장에서 Multi-Agent는 실시간 데이터 수집, 실시간 상황 인지, 생산 전략 계획, 경영 의사결정 지원을 담당합니다.</p>
+
+    <div class="card" style="margin-top:28px;">
+      <div class="meta-list">
+        <div class="meta-row"><div class="k">프로젝트 명</div><div class="v"><strong>Oh My Factory</strong></div></div>
+        <div class="meta-row"><div class="k">프로젝트 단계</div><div class="v"><strong>PoC</strong> — Multi-Agent 시스템의 가치를 검증할 수 있는 최소한의 가치 검증을 수행합니다.</div></div>
+        <div class="meta-row"><div class="k">테스트베드</div><div class="v">고객사 <strong>삼진엘앤디</strong>의 플라스틱 사출품 제조 공장의 <strong>생산 제조 최적화</strong>를 진행합니다. 데이터만 가지고 가상 환경에서 예측하는 것이 아니라, 실제 제조 현장에서 Multi-Agent 시스템의 역할이 얼마나 가치가 있을 수 있는지 검증합니다.</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h3>왜 Multi-Agent 스마트 공장인가</h3>
+      <ul class="clean">
+        <li><strong>제조·생산 비용 최소화</strong> — 생산 이익을 극대화할 수 있는 생산·제조 전략을 항상 유지합니다.</li>
+        <li><strong>365일 24시간 실시간 감시</strong> — 모든 데이터를 실시간 감시하여, 긴급 상황 인지가 늦어져 발생할 수 있는 위험 손실 비용을 방지합니다.</li>
+        <li><strong>데이터 근거 기반 의사결정</strong> — 언제 어디서든 경영자가 빠르고 정확하게 결정할 수 있는 환경을 구축합니다.</li>
+      </ul>
+      <div class="callout">
+        <div class="ct">💡 숫자 + 경험</div>
+        <p>모든 일을 숫자만을 근거로 진행할 수는 없습니다. 그러나 "숫자"라는 근거 위에 경영진의 경험과 직관을 더한 의사결정은 위험을 낮추고 성공 확률을 극대화할 수 있습니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROCESS / GANTT -->
+<section class="block" id="process">
+  <div class="container">
+    <div class="narrow" style="padding-left:0;padding-right:0;">
+      <div class="section-eyebrow">02 — Process</div>
+      <h2 class="section-title">PoC 진행 절차</h2>
+      <p class="section-lead">데이터 수집·전처리부터 Agent 설계, Multi-Agent System 설계까지 3개 단계로 진행하며, 각 단계는 일부 기간을 중첩하여 동시에 진행합니다.</p>
+    </div>
+
+    <div class="gantt" style="margin-top:28px;">
+      <div class="gantt-row head">
+        <div class="gantt-label">단계 / 투입 인원</div>
+        <div class="gantt-weeks">
+          <div class="wk">W1</div><div class="wk">W2</div><div class="wk">W3</div><div class="wk">W4</div><div class="wk">W5</div><div class="wk">W6</div><div class="wk">W7</div>
+        </div>
+      </div>
+      <div class="gantt-row">
+        <div class="gantt-label"><span class="pn">1단계 · 데이터 수집/전처리</span><span class="pp">4주 · 2명</span></div>
+        <div class="gantt-weeks"><div class="bar-wrap"><div class="bar b1" style="left:0%;width:57.14%;">데이터 수집 · 전처리 (W1–W4)</div></div></div>
+      </div>
+      <div class="gantt-row">
+        <div class="gantt-label"><span class="pn">2단계 · Agent 설계/개발</span><span class="pp">4주 · 1명</span></div>
+        <div class="gantt-weeks"><div class="bar-wrap"><div class="bar b2" style="left:14.28%;width:57.14%;">Agent 설계 · 개발 (W2–W5)</div></div></div>
+      </div>
+      <div class="gantt-row">
+        <div class="gantt-label"><span class="pn">3단계 · Multi-Agent System</span><span class="pp">6주 · 1명</span></div>
+        <div class="gantt-weeks"><div class="bar-wrap"><div class="bar b3" style="left:14.28%;width:85.72%;">MAS 설계 · 개발 (W2–W7)</div></div></div>
+      </div>
+    </div>
+    <p style="font-size:12.5px;color:var(--ink-3);margin-top:10px;text-align:center;">2단계는 1단계 2주차부터 시작하며, 3단계는 2단계와 동시에 진행합니다. (※ 전체 기간은 단계 중첩 해석에 따른 추정으로, 확정 시 조정 예정)</p>
+  </div>
+</section>
+
+<!-- PHASE 1 -->
+<section class="block" id="phase1">
+  <div class="narrow">
+    <div class="phase">
+      <div class="phase-head">
+        <div class="phase-no">1</div>
+        <div>
+          <div class="ttl">데이터 수집 및 전처리</div>
+          <div class="badge-row"><span class="badge dur">기간 4주</span><span class="badge ppl">투입 인원 2명</span></div>
+        </div>
+      </div>
+      <p class="section-lead">가장 생산량이 많고, 원자재가 많이 투입되어 원가 관리 및 납품 단가 관리가 어려운 제품을 선정하여 해당 제품에 대한 정보를 수집합니다. 수집 데이터 기간 범위는 <strong>"전체"</strong>로 하되, 어려울 경우 최대한 많은 데이터를 확보합니다.</p>
+
+      <!-- 정형/수치 데이터 -->
+      <div class="card" style="margin-top:24px;">
+        <h3>📐 정형 / 수치 데이터 유형</h3>
+
+        <div class="dt-group">
+          <h4><span class="ix">1</span> 제품 / 원자재 데이터</h4>
+          <div class="subcard">
+            <div class="st">1) 품목 정보 (SKU)</div>
+            <div class="desc">현재 생산 중인 제품 목록</div>
+            <div class="fields"><span class="field">품번</span><span class="field">품명</span><span class="field">고객사</span><span class="field">기타 정보</span></div>
+          </div>
+          <div class="subcard">
+            <div class="st">2) 원재료 구성</div>
+            <div class="desc">품목(SKU)별로 사용되는 원자재 정보</div>
+            <div class="fields"><span class="field">원재료명</span><span class="field">투입량</span><span class="field">구매 단가</span></div>
+          </div>
+          <div class="subcard">
+            <div class="st">3) 그 외 원가 산정 반영 항목</div>
+            <div class="desc">원가 산정에 반영되는 항목들 일체</div>
+          </div>
+        </div>
+
+        <div class="dt-group">
+          <h4><span class="ix">2</span> 주문 / 수주 데이터</h4>
+          <div class="subcard">
+            <div class="st">1) 원재료 주문 / 입고 정보</div>
+            <div class="fields"><span class="field">원재료명</span><span class="field">구매량</span><span class="field">주문일</span><span class="field">입고일</span><span class="field">구매 단가</span><span class="field">판매처</span></div>
+          </div>
+          <div class="subcard">
+            <div class="st">2) 판매 / 주문 정보</div>
+            <div class="fields"><span class="field">제품(SKU)명</span><span class="field">판매수량</span><span class="field">판매단가</span><span class="field">구매처</span><span class="field">생산 기간</span></div>
+          </div>
+        </div>
+
+        <div class="dt-group">
+          <h4><span class="ix">3</span> 현재 재고 데이터</h4>
+          <div class="subcard">
+            <div class="st">1) 재고 제품 데이터</div>
+            <div class="desc">재고 수량은 생산일 기준으로 수량 파악이 필요</div>
+            <div class="fields"><span class="field">품목(SKU)</span><span class="field">재고량</span><span class="field">생산일</span></div>
+          </div>
+          <div class="subcard">
+            <div class="st">2) 원자재 재고 데이터</div>
+            <div class="desc">원자재는 입고일·구매처별로 재고 관리 필요</div>
+            <div class="fields"><span class="field">원재료명</span><span class="field">재고량</span><span class="field">생산일</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 비정형/문맥 데이터 -->
+      <div class="card" style="margin-top:20px;">
+        <h3>📝 비정형 / 문맥 데이터 유형</h3>
+        <ul class="clean">
+          <li>영업 일지 등 영업 진행 사항·결과를 파악할 수 있는 자료</li>
+          <li>의사결정 보고 자료 — 어떤 근거를 기준으로 어떤 의사결정이 이루어졌는지 보고된 자료</li>
+        </ul>
+        <div class="callout">
+          <div class="ct">🔍 비정형 / 문맥 데이터의 필요성</div>
+          <p>정형·수치 데이터만으로 의사결정을 할 경우, 회사마다·생산 라인마다 포함된 다양한 이해관계를 모두 담아내기 어렵습니다. 예를 들어 특정 업체와의 거래 기간에 따른 신뢰도를 반영한 의사결정이나, 향후 얻을 수 있는 미래 가치를 위한 투자성 결정 등은 수치화하여 판단하기보다 경영자의 직관 또는 경험이 반영되어야 합니다. 이 자료는 LLM이 과거 의사결정 자료들을 기반으로 전략을 수립할 수 있도록 돕습니다.</p>
+        </div>
+      </div>
+
+      <!-- 전처리 -->
+      <div class="card" style="margin-top:20px;">
+        <h3>⚙️ 전처리</h3>
+        <div class="pp-list">
+          <div class="pp-item">
+            <div class="n">1</div>
+            <div class="b">
+              <div class="t">가명처리 및 마스킹</div>
+              <div class="d">고객사의 비밀 유지가 필요한 부분 및 개인정보 등 민감정보를 개인이 식별하지 못하도록 익명화합니다.</div>
+              <span class="ex">예) 크레플(주) → C기업</span>
+            </div>
+          </div>
+          <div class="pp-item">
+            <div class="n">2</div>
+            <div class="b">
+              <div class="t">문맥 데이터 벡터화</div>
+              <div class="d">비정형·문맥 데이터를 LLM에서 사용할 수 있도록 벡터 데이터로 변환합니다.</div>
+            </div>
+          </div>
+          <div class="pp-item">
+            <div class="n">3</div>
+            <div class="b">
+              <div class="t">데이터 정규화</div>
+              <div class="d">정형·수치 데이터를 일정한 범위·분포를 가지는 데이터로 정규화합니다.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PHASE 2 -->
+<section class="block" id="phase2">
+  <div class="narrow">
+    <div class="phase">
+      <div class="phase-head">
+        <div class="phase-no">2</div>
+        <div>
+          <div class="ttl">Agent 설계 및 개발</div>
+          <div class="badge-row"><span class="badge dur">기간 4주</span><span class="badge ppl">투입 인원 1명</span></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:8px;">
+        <p>이 단계는 <strong>1단계(데이터 수집 및 전처리)의 2주차부터</strong> 진행합니다.</p>
+        <p>2주차까지 수집된 데이터를 기준으로 필요한 Agent의 역할과 그에 따른 동작 규칙 및 도구 사용 전략을 수립하고, 실제 Agent 동작을 검증하며 개발을 진행합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PHASE 3 -->
+<section class="block" id="phase3">
+  <div class="narrow">
+    <div class="phase">
+      <div class="phase-head">
+        <div class="phase-no">3</div>
+        <div>
+          <div class="ttl">Multi-Agent System 설계 및 개발</div>
+          <div class="badge-row"><span class="badge dur">기간 6주</span><span class="badge ppl">투입 인원 1명</span></div>
+        </div>
+      </div>
+      <p class="section-lead">이 단계는 <strong>2단계(Agent 설계 및 개발) 단계와 동시에 진행</strong>합니다.</p>
+
+      <div class="card" style="margin-top:20px;">
+        <h3>1. Agent 운영 관리 방식</h3>
+        <div class="rule-grid">
+          <div class="rule"><div class="rh">규칙 기반</div><div class="rd">정의된 규칙에 따라 Agent를 운영·관리합니다.</div></div>
+          <div class="rule"><div class="rh">시간 기반</div><div class="rd">정해진 시간 주기에 따라 Agent를 운영·관리합니다.</div></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3>2. Agent 간의 상호 협력 처리 방식</h3>
+        <p>다수의 Agent가 상호 협력하여 과업을 처리하는 방식을 정의합니다.</p>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3>3. 최종 의사결정 Agent의 의사결정 규칙 정의</h3>
+        <p>최종 의사결정을 담당하는 Agent의 의사결정 규칙을 정의합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="narrow">
+    <div class="draft-note">📄 본 문서는 초안(v1)입니다 — 주신 기획 내용을 그대로 렌더링했으며, 명백한 오타만 정리했습니다.</div>
+    <div>Oh My Factory · PoC 프로젝트 기획서 · 크레플(주)</div>
+  </div>
+</footer>
+
+</body>
+</html>
