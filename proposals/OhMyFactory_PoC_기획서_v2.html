@@ -114,6 +114,19 @@
   .kpi .to { font-size: 18px; font-weight: 800; color: var(--brand); letter-spacing: -0.01em; }
   .kpi .kd { font-size: 13px; color: var(--ink-3); margin-top: 10px; line-height: 1.6; }
 
+  /* ─── Evaluation ─── */
+  .eval-head { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+  .eval-head .en { width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--brand-soft); color: var(--brand); font-weight: 800; font-size: 15px; display: grid; place-items: center; }
+  .eval-head h3 { margin: 0; }
+  .rating-scale { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .rchip { flex: 1; min-width: 130px; border-radius: 12px; padding: 14px 16px; text-align: center; border: 1px solid; }
+  .rchip .rno { font-size: 11px; font-weight: 700; opacity: 0.7; margin-bottom: 5px; letter-spacing: 0.04em; }
+  .rchip .rlvl { font-weight: 800; font-size: 15.5px; }
+  .rchip.r1 { background: var(--good-soft); border-color: #6ee7b7; color: var(--good); }
+  .rchip.r2 { background: var(--warn-soft); border-color: #fde68a; color: var(--warn); }
+  .rchip.r3 { background: #fff1e6; border-color: #fed7aa; color: #c2410c; }
+  .rchip.r4 { background: var(--bad-soft); border-color: #fecaca; color: var(--bad); }
+
   /* ─── Scenario ─── */
   .scn-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 8px; }
   .scn { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; background: var(--bg-elev); display: grid; grid-template-columns: 52px 1fr; gap: 18px; align-items: start; }
@@ -277,37 +290,34 @@
   </div>
 </section>
 
-<!-- KPI -->
+<!-- EVALUATION -->
 <section class="block" id="kpi">
   <div class="narrow">
-    <div class="section-eyebrow">02 — Success Criteria</div>
-    <h2 class="section-title">PoC 성공 기준 · 검증 지표</h2>
-    <p class="section-lead">PoC의 목적은 "가치 검증"입니다. 아래 지표를 통해 Multi-Agent 시스템의 실제 가치를 정량적으로 측정합니다. (수치는 검증 <strong>목표·기대치</strong>이며, 실제 효과는 8주 이후 효과 측정 단계에서 확정합니다.)</p>
+    <div class="section-eyebrow">02 — Evaluation</div>
+    <h2 class="section-title">성공 기준 · 검증 지표</h2>
+    <p class="section-lead">이번 PoC 단계의 목표는 고객사가 <strong>Agent 의사결정의 정확도를 평가</strong>하는 것입니다. 의사결정 정확도는 <strong>정량적 평가</strong>와 <strong>정성적 평가</strong>로 나누어 검증합니다.</p>
 
-    <div class="kpi-grid">
-      <div class="kpi">
-        <span class="tag-target">검증 목표</span>
-        <div class="kt">의사결정 소요 시간</div>
-        <div class="kflow"><span class="from">기존 수 시간</span><span class="arrow">→</span><span class="to">분 단위</span></div>
-        <div class="kd">엑셀 분석·부서 협의·보고로 이어지던 다단계 과정을 자연어 질의 한 번으로 단축</div>
+    <div class="card" style="margin-top:24px;">
+      <div class="eval-head"><span class="en">1</span><h3>정량적 평가</h3></div>
+      <p>의사결정 안에 포함된 <strong>수치가 실제 수치와 일치하는지</strong>를 검증합니다.</p>
+      <div class="callout">
+        <div class="ct">📊 예시</div>
+        <p>최대 이윤 계산 결과가 실제 수치와 일치하는지 확인</p>
       </div>
-      <div class="kpi">
-        <span class="tag-target">검증 목표</span>
-        <div class="kt">의사결정 건당 순이익 개선</div>
-        <div class="kflow"><span class="from">경험적 선택</span><span class="arrow">→</span><span class="to">데이터 기반 최적안</span></div>
-        <div class="kd">동일 상황에서 경험에 의한 선택과 데이터 기반 추천안의 순이익 차이를 비교 측정</div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="eval-head"><span class="en">2</span><h3>정성적 평가</h3></div>
+      <p>Agent가 제시한 <strong>의사결정 결과와 근거를 사람이 판단</strong>하여 평가지를 작성합니다. 결과를 아래 등급으로 평가하고, 미흡한 경우 <strong>어떤 부분이 어떻게 미흡한지 간략히 기록</strong>하여 평가서를 작성합니다.</p>
+      <div class="rating-scale">
+        <div class="rchip r1"><div class="rno">평가 등급</div><div class="rlvl">적합</div></div>
+        <div class="rchip r2"><div class="rno">평가 등급</div><div class="rlvl">부분적 미흡</div></div>
+        <div class="rchip r3"><div class="rno">평가 등급</div><div class="rlvl">많은 부분 미흡</div></div>
+        <div class="rchip r4"><div class="rno">평가 등급</div><div class="rlvl">오류</div></div>
       </div>
-      <div class="kpi">
-        <span class="tag-target">검증 목표</span>
-        <div class="kt">의사결정 추적성</div>
-        <div class="kflow"><span class="from">경험·직관 기반</span><span class="arrow">→</span><span class="to">근거 데이터 기록</span></div>
-        <div class="kd">모든 추천에 근거 데이터를 기록하여 사후 감사·추적이 가능한 비율을 측정</div>
-      </div>
-      <div class="kpi">
-        <span class="tag-target">검증 목표</span>
-        <div class="kt">위험·손실 선제 식별</div>
-        <div class="kflow"><span class="from">사후 인지</span><span class="arrow">→</span><span class="to">선제 자동 식별</span></div>
-        <div class="kd">원자재 가격 변동 등 위험 상황에서 영향 SKU·적자 전환 품목을 선제적으로 식별</div>
+      <div class="callout">
+        <div class="ct">📝 평가서 작성 방식</div>
+        <p>각 의사결정 결과에 대해 위 등급으로 평가하고, "부분적 미흡" 이하인 경우 미흡한 부분과 그 이유를 간략히 기록하여 평가서로 남깁니다.</p>
       </div>
     </div>
   </div>
