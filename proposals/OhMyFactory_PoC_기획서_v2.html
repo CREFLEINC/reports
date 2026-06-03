@@ -161,6 +161,11 @@
   .uarrow { display: flex; align-items: center; padding: 0 8px; color: var(--line-2); font-size: 20px; font-weight: 800; }
   @media (max-width: 640px) { .uflow { flex-direction: column; } .uarrow { transform: rotate(90deg); padding: 6px 0; align-self: center; } }
 
+  /* ─── Relationship mini-diagram ─── */
+  .relmini { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 10px 0 8px; }
+  .relmini .rn { font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 6px; background: var(--brand-soft); color: var(--brand); border: 1px solid #bfdbfe; white-space: nowrap; }
+  .relmini .ra { color: var(--ink-3); font-weight: 800; font-size: 13px; }
+
   /* ─── Scenario ─── */
   .scn-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 8px; }
   .scn { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; background: var(--bg-elev); display: grid; grid-template-columns: 52px 1fr; gap: 18px; align-items: start; }
@@ -838,24 +843,113 @@
         <div class="badge-row"><span class="badge dur">기간 6주</span><span class="badge ppl">투입 인원 1명</span><span class="badge when">W2–W7</span></div>
       </div>
     </div>
-    <p class="section-lead">이 단계는 <strong>2단계(Agent 설계 및 개발) 단계와 동시에 진행</strong>합니다.</p>
+    <p class="section-lead">이 단계는 2단계와 동시에 진행하며, Agent들이 <strong>언제 일하고, 어떻게 협력하며, 어떻게 결론을 내는지</strong>를 개념적으로 정의합니다. (기술 아키텍처가 아니라 역할과 관계 중심)</p>
 
+    <!-- 3-1. 운영 관리 -->
     <div class="card" style="margin-top:20px;">
-      <h3>1. Agent 운영 관리 방식</h3>
+      <h3>1. Agent 운영 관리 방식 — 언제 Agent가 일하는가</h3>
+      <p>Agent의 작동 시점은 두 가지 방식으로 관리합니다. 돌발 상황과 정기 점검을 모두 빠짐없이 다루기 위함입니다.</p>
       <div class="rule-grid">
-        <div class="rule"><div class="rh">규칙 기반</div><div class="rd">정의된 규칙에 따라 Agent를 운영·관리합니다.</div></div>
-        <div class="rule"><div class="rh">시간 기반</div><div class="rd">정해진 시간 주기에 따라 Agent를 운영·관리합니다.</div></div>
+        <div class="rule">
+          <div class="rh">⚡ 규칙 기반 — 이벤트 트리거</div>
+          <div class="rd">정해진 조건이 충족되면 <b>즉시</b> 작동합니다. 긴급 상황을 놓치지 않는 24시간 감시가 목적입니다.</div>
+          <div class="docchips" style="margin-top:11px;"><span class="docchip">신규 PO 수신</span><span class="docchip">원자재가 임계치 초과</span><span class="docchip">적자 전환 감지</span><span class="docchip">가동률 초과</span></div>
+        </div>
+        <div class="rule">
+          <div class="rh">🕒 시간 기반 — 주기 트리거</div>
+          <div class="rd">정해진 <b>주기</b>마다 작동합니다. 돌발 상황이 없어도 정기적으로 점검·최적화하는 것이 목적입니다.</div>
+          <div class="docchips" style="margin-top:11px;"><span class="docchip">매일 생산 현황 점검</span><span class="docchip">주간 생산계획 리뷰</span><span class="docchip">기간 종료 정산</span></div>
+        </div>
+      </div>
+      <div class="callout">
+        <div class="ct">🔁 두 방식은 상호보완</div>
+        <p>이벤트(돌발) + 주기(정기)를 함께 운영해 빈틈 없는 감시·관리 체계를 만듭니다.</p>
       </div>
     </div>
 
+    <!-- 3-2. 협력 -->
     <div class="card" style="margin-top:20px;">
-      <h3>2. Agent 간의 상호 협력 처리 방식</h3>
-      <p>다수의 Agent가 상호 협력하여 과업을 처리하는 방식을 정의합니다.</p>
+      <h3>2. Agent 간의 상호 협력 처리 방식 — 어떻게 함께 일하는가</h3>
+      <p>네 개의 Agent(수집 → 인지 → 계획 → 의사결정)는 각자의 결과를 주고받으며 협력합니다. 협력은 세 가지 관계로 이루어집니다. <a href="#concept">전체 파이프라인은 「Multi-Agent 시스템 개념」 참고</a>.</p>
+      <div class="grid-3">
+        <div class="role">
+          <div class="ri">➡️</div>
+          <div class="rh">전달 (Relay)</div>
+          <div class="relmini"><span class="rn">①</span><span class="ra">→</span><span class="rn">②</span><span class="ra">→</span><span class="rn">③</span><span class="ra">→</span><span class="rn">④</span></div>
+          <div class="rd">한 Agent의 결과가 다음 Agent의 입력이 되어 순차적으로 이어집니다.</div>
+        </div>
+        <div class="role">
+          <div class="ri">🔄</div>
+          <div class="rh">위임 (Delegate)</div>
+          <div class="relmini"><span class="rn">④ 의사결정</span><span class="ra">⇄</span><span class="rn">③ 계획</span></div>
+          <div class="rd">판단에 정보가 더 필요하면, 의사결정 Agent가 계획 Agent에게 추가 시나리오 계산을 요청합니다.</div>
+        </div>
+        <div class="role">
+          <div class="ri">🧩</div>
+          <div class="rh">종합 (Aggregate)</div>
+          <div class="relmini"><span class="rn">옵션 A·B·C</span><span class="ra">→</span><span class="rn">④</span></div>
+          <div class="rd">여러 옵션과 근거를 한데 모아 종합적으로 비교·판단합니다.</div>
+        </div>
+      </div>
+      <div class="callout">
+        <div class="ct">🔒 소통 방식 — 캡슐화</div>
+        <p>각 Agent는 내부 동작을 드러내지 않고 <strong>요청과 응답으로만</strong> 협력합니다. 덕분에 한 Agent를 개별적으로 검증하거나 교체하기 쉽습니다. (개방형 표준 A2A 기반 — 06 시스템 개념 참고)</p>
+      </div>
+      <div style="margin-top:18px;">
+        <div class="gl" style="margin-bottom:10px;">왜 단일 Agent가 아니라 Multi-Agent인가</div>
+        <div class="gov-grid">
+          <div class="gov"><div class="gi">🎯</div><div><div class="gh">책임이 명확</div><div class="gd">문제가 생기면 어느 단계(Agent)인지 바로 추적할 수 있습니다.</div></div></div>
+          <div class="gov"><div class="gi">🔧</div><div><div class="gh">검증·교체 용이</div><div class="gd">역할별로 나뉘어 부분만 점검하거나 개선·교체할 수 있습니다.</div></div></div>
+          <div class="gov"><div class="gi">➕</div><div><div class="gh">확장 쉬움</div><div class="gd">새 역할이 필요하면 Agent를 추가해 기능을 넓힐 수 있습니다.</div></div></div>
+          <div class="gov"><div class="gi">⏱️</div><div><div class="gh">동시 처리</div><div class="gd">감시와 계획 수립 등 서로 다른 일을 병렬로 진행할 수 있습니다.</div></div></div>
+        </div>
+      </div>
     </div>
 
+    <!-- 3-3. 의사결정 규칙 -->
     <div class="card" style="margin-top:20px;">
-      <h3>3. 최종 의사결정 Agent의 의사결정 규칙 정의</h3>
-      <p>최종 의사결정을 담당하는 Agent의 의사결정 규칙을 정의합니다.</p>
+      <h3>3. 최종 의사결정 Agent의 의사결정 규칙 — 어떻게 결론을 내는가</h3>
+      <p>최종 의사결정 Agent는 두 가지 근거를 함께 보고 최적안을 가립니다. <strong>숫자만으로 담기 어려운 부분을 문맥으로 보정</strong>하는 것이 핵심입니다.</p>
+      <div class="grid-2" style="margin-top:6px;">
+        <div class="inch">
+          <div class="ich">📊 정량 근거 — 숫자</div>
+          <div class="icd">순이익 · 원가 · 라인 가동률 · 납기 등 측정 가능한 수치.</div>
+        </div>
+        <div class="inch">
+          <div class="ich">📚 정성 근거 — 문맥</div>
+          <div class="icd">과거 의사결정 사례 · 거래처 신뢰도 · 전략적 가치 등 수치로 담기 어려운 맥락 (등록된 문서에서 참조).</div>
+        </div>
+      </div>
+
+      <div class="gl" style="margin:22px 0 8px;">의사결정 흐름</div>
+      <div class="uflow">
+        <div class="ustep">
+          <div class="un">INPUT</div>
+          <div class="ut">근거 수집</div>
+          <div class="ud">정량 수치 + 정성 문맥을 함께 확보</div>
+        </div>
+        <div class="uarrow">→</div>
+        <div class="ustep">
+          <div class="un">RULE</div>
+          <div class="ut">선택 규칙 적용</div>
+          <div class="ud">제약(납기·가용 자원) 충족 → 리스크 허용 범위 내 → 순이익 최대 안 우선 → 정성 근거로 보정</div>
+        </div>
+        <div class="uarrow">→</div>
+        <div class="ustep">
+          <div class="un">HUMAN</div>
+          <div class="ut">사람이 최종 확정</div>
+          <div class="ud">Agent는 최적안·근거를 제시, 결정은 사람이</div>
+        </div>
+      </div>
+
+      <div class="callout accent2">
+        <div class="ct">🤝 Human-in-the-loop · 근거 기록</div>
+        <p>Agent는 <strong>제안</strong>하고 사람이 <strong>결정</strong>합니다. 모든 추천에는 근거가 함께 기록되어 사후에 추적·검토할 수 있습니다. (04 검증 지표 · 08 보안·거버넌스와 연결)</p>
+      </div>
+      <div class="callout">
+        <div class="ct">💡 왜 이렇게 설계하나</div>
+        <p>데이터라는 <strong>숫자 근거</strong> 위에 경영진의 <strong>경험과 직관</strong>을 더하는 것 — 이것이 위험을 낮추고 성공 확률을 높이는 의사결정 방식입니다.</p>
+      </div>
     </div>
   </div>
 </section>
