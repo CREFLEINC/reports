@@ -218,6 +218,51 @@
   .gov .gh { font-weight: 700; font-size: 14.5px; color: var(--ink); margin-bottom: 3px; }
   .gov .gd { font-size: 13px; color: var(--ink-3); line-height: 1.6; }
 
+  /* ─── Agent cards ─── */
+  .agent-list { display: grid; gap: 16px; margin-top: 8px; }
+  .agent-card { border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; background: var(--bg-elev); display: grid; grid-template-columns: 56px 1fr; gap: 18px; align-items: start; }
+  .agent-card .ac-no { width: 50px; height: 50px; border-radius: 12px; background: linear-gradient(135deg, var(--brand), var(--accent)); color: white; display: grid; place-items: center; font-size: 24px; }
+  .agent-card .ac-name { font-size: 17px; font-weight: 800; color: var(--ink); }
+  .agent-card .ac-role { font-size: 12.5px; color: var(--brand); font-weight: 700; margin-top: 2px; }
+  .agent-card .ac-io { font-size: 13.5px; color: var(--ink-2); margin-top: 10px; line-height: 1.8; }
+  .agent-card .ac-io b { color: var(--ink-3); font-weight: 700; font-size: 12px; }
+  .agent-card .ac-tools { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .tbadge { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 7px; border: 1px solid; }
+  .tbadge.mcp { background: var(--brand-soft); border-color: #bfdbfe; color: var(--brand); }
+  .tbadge.rag { background: #faf5ff; border-color: #e9d5ff; color: var(--accent); }
+  .tbadge.a2a { background: #ecfeff; border-color: #a5f3fc; color: #0e7490; }
+  .tbadge.etc { background: #f1f5f9; border-color: var(--line-2); color: var(--ink-2); }
+
+  /* ─── Tool concepts ─── */
+  .tool-concepts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 8px; }
+  @media (max-width: 760px) { .tool-concepts { grid-template-columns: 1fr; } }
+  .tc { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: #fcfdfe; }
+  .tc .tch { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; flex-wrap: wrap; }
+  .tc .tcabbr { font-size: 13px; font-weight: 800; padding: 4px 10px; border-radius: 7px; }
+  .tc.c-mcp .tcabbr { background: var(--brand-soft); color: var(--brand); }
+  .tc.c-rag .tcabbr { background: #faf5ff; color: var(--accent); }
+  .tc.c-a2a .tcabbr { background: #ecfeff; color: #0e7490; }
+  .tc .tcname { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .tc .tcd { font-size: 13.5px; color: var(--ink-3); line-height: 1.75; margin: 0; }
+  .tc .tcd b { color: var(--ink-2); }
+
+  /* ─── Arch diagram ─── */
+  .arch { margin-top: 20px; border: 1px solid var(--line); border-radius: 14px; padding: 24px 20px; background: var(--bg-elev); overflow-x: auto; }
+  .arch-pipe { display: flex; align-items: stretch; gap: 0; min-width: 660px; }
+  .arch-node { flex: 1; border: 1px solid var(--line-2); border-radius: 12px; padding: 14px 8px; text-align: center; display: flex; flex-direction: column; justify-content: center; }
+  .arch-node.src { background: var(--brand-soft); border-color: #bfdbfe; }
+  .arch-node.out { background: var(--good-soft); border-color: #6ee7b7; }
+  .arch-node.agent { background: #fcfdfe; }
+  .arch-node .ann { font-size: 10.5px; color: var(--ink-3); font-weight: 600; }
+  .arch-node .anm { font-size: 13px; font-weight: 800; color: var(--ink); margin-top: 3px; }
+  .arch-node .asub { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
+  .arch-arrow { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 4px; min-width: 50px; }
+  .arch-arrow .lbl { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; margin-bottom: 4px; white-space: nowrap; color: #0e7490; background: #ecfeff; border: 1px solid #a5f3fc; }
+  .arch-arrow .lbl.mcp { color: var(--brand); background: var(--brand-soft); border-color: #bfdbfe; }
+  .arch-arrow .ico { color: var(--line-2); font-size: 18px; font-weight: 800; }
+  .arch-rag { display: flex; align-items: center; gap: 10px; justify-content: center; margin-top: 14px; padding-top: 16px; border-top: 1px dashed var(--line); font-size: 13px; color: var(--ink-3); flex-wrap: wrap; }
+  .arch-rag .vs { font-weight: 700; color: var(--accent); background: #faf5ff; border: 1px solid #e9d5ff; padding: 4px 11px; border-radius: 8px; }
+
   ul.clean { margin: 8px 0 0; padding-left: 0; list-style: none; }
   ul.clean li { position: relative; padding-left: 22px; font-size: 15px; color: var(--ink-2); margin-bottom: 9px; line-height: 1.7; }
   ul.clean li::before { content: ""; position: absolute; left: 4px; top: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
@@ -546,6 +591,96 @@
     <div class="card" style="margin-top:8px;">
       <p>이 단계는 <strong>1단계(데이터 수집 및 전처리)의 2주차부터</strong> 진행합니다.</p>
       <p>2주차까지 수집된 데이터를 기준으로 필요한 Agent의 역할과 그에 따른 동작 규칙 및 도구 사용 전략을 수립하고, 실제 Agent 동작을 검증하며 개발을 진행합니다.</p>
+    </div>
+
+    <!-- Agent 구성 -->
+    <div class="card" style="margin-top:20px;">
+      <h3>🤖 필요한 Agent 구성</h3>
+      <p>앞서 정의한 네 가지 기능 역할(수집·인지·계획·의사결정 지원)을 <strong>파이프라인 형태의 4개 Agent</strong>로 구체화합니다. Agent 간 협력·오케스트레이션과 최종 의사결정 규칙은 3단계(Multi-Agent System)에서 상세화합니다.</p>
+      <div class="agent-list">
+        <div class="agent-card">
+          <div class="ac-no">📡</div>
+          <div>
+            <div class="ac-name">① 데이터 수집 Agent</div>
+            <div class="ac-role">실시간 데이터 수집</div>
+            <div class="ac-io"><b>입력</b> MES·ERP 등 사내 시스템 &nbsp;→&nbsp; <b>출력</b> 정규화된 정형 데이터</div>
+            <div class="ac-tools"><span class="tbadge mcp">🔌 MCP</span><span class="tbadge a2a">🔗 A2A</span></div>
+          </div>
+        </div>
+        <div class="agent-card">
+          <div class="ac-no">🔎</div>
+          <div>
+            <div class="ac-name">② 상황 인지 Agent</div>
+            <div class="ac-role">실시간 상황 인지</div>
+            <div class="ac-io"><b>입력</b> 수집 데이터 &nbsp;→&nbsp; <b>출력</b> 위험·기회 이벤트 (원자재 급등, 적자 전환, 가동률 초과 등)</div>
+            <div class="ac-tools"><span class="tbadge etc">📐 규칙·임계치 엔진</span><span class="tbadge a2a">🔗 A2A</span></div>
+          </div>
+        </div>
+        <div class="agent-card">
+          <div class="ac-no">🧭</div>
+          <div>
+            <div class="ac-name">③ 전략 계획 Agent</div>
+            <div class="ac-role">생산 전략 계획</div>
+            <div class="ac-io"><b>입력</b> 인지된 상황 + 현재 데이터 + 문맥 &nbsp;→&nbsp; <b>출력</b> 다중 생산 옵션 (순이익·리스크)</div>
+            <div class="ac-tools"><span class="tbadge rag">📚 RAG</span><span class="tbadge etc">🧮 시뮬레이션·계산</span><span class="tbadge a2a">🔗 A2A</span></div>
+          </div>
+        </div>
+        <div class="agent-card">
+          <div class="ac-no">🎯</div>
+          <div>
+            <div class="ac-name">④ 의사결정 지원 Agent</div>
+            <div class="ac-role">경영 의사결정 지원</div>
+            <div class="ac-io"><b>입력</b> 전략 옵션 &nbsp;→&nbsp; <b>출력</b> 최적안 추천·근거·보고서 / 자연어 응답</div>
+            <div class="ac-tools"><span class="tbadge rag">📚 RAG</span><span class="tbadge etc">📝 보고서 생성</span><span class="tbadge etc">💬 자연어 인터페이스</span><span class="tbadge a2a">🔗 A2A</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 도구 개념 -->
+    <div class="card" style="margin-top:20px;">
+      <h3>🧩 도구 개념</h3>
+      <p>각 Agent는 사내 데이터·지식·다른 Agent와 연결하기 위해 세 가지 표준 도구를 사용합니다. <strong>MCP는 도구·데이터 연결, RAG는 지식 검색, A2A는 Agent 간 소통</strong>을 담당하며 서로 상호보완적입니다.</p>
+      <div class="tool-concepts">
+        <div class="tc c-mcp">
+          <div class="tch"><span class="tcabbr">MCP</span><span class="tcname">Model Context Protocol</span></div>
+          <p class="tcd"><b>Agent ↔ 도구·데이터.</b> MES·ERP 등 사내 시스템의 정형 데이터를 표준 방식으로 <b>읽기</b>. 기존 시스템을 대체하지 않고 그 위에서 연동합니다.</p>
+        </div>
+        <div class="tc c-rag">
+          <div class="tch"><span class="tcabbr">RAG</span><span class="tcname">Retrieval-Augmented Generation</span></div>
+          <p class="tcd"><b>Agent ↔ 지식.</b> 1단계에서 벡터화한 <b>비정형/문맥 데이터</b>(영업일지·과거 의사결정 보고서)를 검색해, 수치로 담기 어려운 정성적 판단 근거를 의사결정에 반영합니다.</p>
+        </div>
+        <div class="tc c-a2a">
+          <div class="tch"><span class="tcabbr">A2A</span><span class="tcname">Agent2Agent Protocol</span></div>
+          <p class="tcd"><b>Agent ↔ Agent.</b> Google이 공개하고 <b>Linux Foundation</b>이 관리하는 개방형 표준. 각 Agent가 내부 로직·도구를 노출하지 않고(캡슐화) 작업을 위임·협력합니다.</p>
+        </div>
+      </div>
+
+      <!-- 아키텍처 다이어그램 -->
+      <div class="arch">
+        <div class="arch-pipe">
+          <div class="arch-node src"><div class="ann">데이터 소스</div><div class="anm">MES · ERP</div></div>
+          <div class="arch-arrow"><span class="lbl mcp">MCP</span><span class="ico">→</span></div>
+          <div class="arch-node agent"><div class="ann">①</div><div class="anm">수집</div></div>
+          <div class="arch-arrow"><span class="lbl">A2A</span><span class="ico">→</span></div>
+          <div class="arch-node agent"><div class="ann">②</div><div class="anm">인지</div></div>
+          <div class="arch-arrow"><span class="lbl">A2A</span><span class="ico">→</span></div>
+          <div class="arch-node agent"><div class="ann">③</div><div class="anm">계획</div></div>
+          <div class="arch-arrow"><span class="lbl">A2A</span><span class="ico">→</span></div>
+          <div class="arch-node agent"><div class="ann">④</div><div class="anm">의사결정</div></div>
+          <div class="arch-arrow"><span class="ico">→</span></div>
+          <div class="arch-node out"><div class="ann">사용자 접점</div><div class="anm">자연어·대시보드</div></div>
+        </div>
+        <div class="arch-rag">
+          <span class="vs">📚 벡터 스토어 (문맥 데이터)</span>
+          <span>—&nbsp;<b>RAG</b>&nbsp;→&nbsp;③ 계획 · ④ 의사결정 Agent가 참조</span>
+        </div>
+      </div>
+
+      <div class="callout">
+        <div class="ct">🔗 MCP + A2A 상호보완</div>
+        <p>MCP는 Agent를 <strong>도구·데이터</strong>에 연결하고, A2A는 Agent를 <strong>다른 Agent</strong>에 연결합니다. 두 표준을 함께 사용해, 사내 시스템 연동(MCP)과 Agent 간 협력(A2A)을 모두 개방형 표준 위에서 구현합니다.</p>
+      </div>
     </div>
   </div>
 </section>
