@@ -313,11 +313,12 @@
     <div class="brand"><span class="dot">⚙</span> Oh My Factory</div>
     <div class="nav-links">
       <a href="#overview">개요</a>
-      <a href="#kpi">검증 지표</a>
-      <a href="#scenario">검증 시나리오</a>
-      <a href="#concept">Agent 개념</a>
       <a href="#usage">사용 시나리오</a>
-      <a href="#process">진행 절차</a>
+      <a href="#scenario">검증 시나리오</a>
+      <a href="#kpi">검증 지표</a>
+      <a href="#process">개발 계획</a>
+      <a href="#concept">Agent 개념</a>
+      <a href="#milestones">마일스톤</a>
       <a href="#governance">보안·거버넌스</a>
     </div>
     <span class="pill">PoC 기획서 · v2</span>
@@ -370,10 +371,108 @@
   </div>
 </section>
 
-<!-- EVALUATION -->
+<!-- USAGE -->
+<section class="block" id="usage">
+  <div class="narrow">
+    <div class="section-eyebrow">02 — Usage</div>
+    <h2 class="section-title">사용자 시스템 사용 시나리오</h2>
+    <p class="section-lead">사용자가 실제로 시스템을 사용하는 두 가지 핵심 흐름입니다 — 기초 데이터를 시스템에 넣는 과정, 그리고 PO(발주) 정보를 전달해 생산 계획을 제안받는 과정.</p>
+
+    <!-- UC1 -->
+    <div class="card" style="margin-top:24px;">
+      <div class="phase-head" style="margin-bottom:12px;">
+        <div class="phase-no">📥</div>
+        <div><div class="ttl">1. 기초 데이터 입력</div></div>
+      </div>
+      <p>두 가지 경로로 데이터를 시스템에 등록합니다.</p>
+      <div class="inch-grid">
+        <div class="inch">
+          <div class="ich">🔌 MES · ERP — 실시간 자동 수집</div>
+          <div class="icd">MES·ERP 데이터는 <b>MCP</b>를 이용해 실시간으로 기초 데이터를 자동으로 받아옵니다. (라인 가동률·가용 시간, 자재 재고·리드타임, SKU 마진·원가, 진행 중 주문 등)</div>
+          <div class="ac-tools" style="margin-top:11px;"><span class="tbadge mcp">🔌 MCP · 실시간</span></div>
+        </div>
+        <div class="inch">
+          <div class="ich">📄 레거시 문서 — 원본 그대로 등록</div>
+          <div class="icd">그 외 레거시 시스템에서 생성되는 자료는 <b>원본 문서를 그대로 추가하여 등록</b>할 수 있습니다. (영업일지, 과거 의사결정 보고서, BOM·라우팅 등) 비정형 자료는 전처리·벡터화되어 RAG로 활용됩니다.</div>
+          <div class="docchips"><span class="docchip">.docx</span><span class="docchip">.xlsx</span><span class="docchip">.pdf 등</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UC2 -->
+    <div class="card" style="margin-top:20px;">
+      <div class="phase-head" style="margin-bottom:12px;">
+        <div class="phase-no">🧭</div>
+        <div><div class="ttl">2. Agent의 생산 계획 제안</div></div>
+      </div>
+      <p><strong>PO(Purchase Order, 발주) 정보</strong>를 텍스트 또는 문서 원본 그대로 Agent에 전달하면, Agent가 생산 계획을 검토한 뒤 제안합니다.</p>
+      <div class="uflow">
+        <div class="ustep">
+          <div class="un">INPUT</div>
+          <div class="ut">PO 정보 전달</div>
+          <div class="ud">발주 메일·문서를 텍스트 또는 원본 그대로 전달 (자연어 질의도 가능)</div>
+        </div>
+        <div class="uarrow">→</div>
+        <div class="ustep">
+          <div class="un">PROCESS</div>
+          <div class="ut">생산 계획 검토</div>
+          <div class="ud">라인 가용성·자재·원가·납기를 종합해 다중 옵션을 순이익·리스크로 비교</div>
+        </div>
+        <div class="uarrow">→</div>
+        <div class="ustep">
+          <div class="un">OUTPUT</div>
+          <div class="ut">생산 계획 제안</div>
+          <div class="ud">최적안 추천 + 근거 데이터 + 의사결정 보고서 자동 생성</div>
+        </div>
+      </div>
+      <div class="callout">
+        <div class="ct">📧 입력 예시 — 발주/긴급 요청을 그대로 전달</div>
+        <p><strong>제목</strong> [긴급/회신요청] GS-201 가스켓 2주간 30% 증산 검토 요청<br/><strong>본문</strong> 증산 기간 6/3~6/16(2주) · 일 평균 +15,000개(+30%) · 회신 마감 오늘 18시<br/>→ Agent가 내용을 분석해 라인 전환·야간 가동·외주 등 옵션을 비교하고, 근거와 함께 최적안을 제안합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SCENARIO -->
+<section class="block" id="scenario">
+  <div class="narrow">
+    <div class="section-eyebrow">03 — Validation Scenarios</div>
+    <h2 class="section-title">검증 시나리오</h2>
+    <p class="section-lead">실제 제조 현장에서 반복되는 의사결정 상황을 PoC에서 재현하여 Multi-Agent 시스템의 가치를 검증합니다.</p>
+
+    <div class="scn-grid">
+      <div class="scn">
+        <div class="sn">1</div>
+        <div>
+          <div class="sh">긴급 증산 요청 대응</div>
+          <div class="sd">고객사의 긴급 증산 요청 시, 라인 전환·야간 가동·외주 등 복수의 생산 옵션을 <strong>순이익과 리스크 기준으로 동시 비교</strong>하여 최적안을 추천하고, 근거가 포함된 의사결정 보고서를 자동 생성합니다.</div>
+          <span class="sval">다중 옵션 비교 → 최적안 추천 → 보고서 자동 생성</span>
+        </div>
+      </div>
+      <div class="scn">
+        <div class="sn">2</div>
+        <div>
+          <div class="sh">원자재 가격 급등 대응</div>
+          <div class="sd">원자재 가격이 급등할 때 영향을 받는 SKU와 <strong>적자로 전환되는 품목을 선제적으로 자동 식별</strong>하여, 담당자가 출근하기 전에 대응이 필요한 품목을 알립니다.</div>
+          <span class="sval">위험 감지 → 영향 SKU·적자 품목 자동 식별 → 선제 알림</span>
+        </div>
+      </div>
+      <div class="scn">
+        <div class="sn">3</div>
+        <div>
+          <div class="sh">신규 수주 기회 최적화</div>
+          <div class="sd">신규 견적·수주 기회가 발생했을 때 라인 가용성과 누적 순이익을 분석하여, <strong>손실을 방지하고 이윤을 최적화하는 수주 구조</strong>를 설계합니다.</div>
+          <span class="sval">라인 가용성·누적 순이익 분석 → 최적 수주 구조 설계</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- KPI -->
 <section class="block" id="kpi">
   <div class="narrow">
-    <div class="section-eyebrow">02 — Evaluation</div>
+    <div class="section-eyebrow">04 — Evaluation</div>
     <h2 class="section-title">성공 기준 · 검증 지표</h2>
     <p class="section-lead">이번 PoC 단계의 목표는 고객사가 <strong>Agent 의사결정의 정확도</strong>와 그 <strong>결과의 생산성 향상 효과</strong>를 평가하는 것입니다. (A) 의사결정 정확도는 정량·정성 평가로, (B) 결과 효과는 생산 계획 자동화의 생산성 향상율로 검증합니다.</p>
 
@@ -438,138 +537,12 @@
   </div>
 </section>
 
-<!-- SCENARIO -->
-<section class="block" id="scenario">
-  <div class="narrow">
-    <div class="section-eyebrow">03 — Validation Scenarios</div>
-    <h2 class="section-title">검증 시나리오</h2>
-    <p class="section-lead">실제 제조 현장에서 반복되는 의사결정 상황을 PoC에서 재현하여 Multi-Agent 시스템의 가치를 검증합니다.</p>
-
-    <div class="scn-grid">
-      <div class="scn">
-        <div class="sn">1</div>
-        <div>
-          <div class="sh">긴급 증산 요청 대응</div>
-          <div class="sd">고객사의 긴급 증산 요청 시, 라인 전환·야간 가동·외주 등 복수의 생산 옵션을 <strong>순이익과 리스크 기준으로 동시 비교</strong>하여 최적안을 추천하고, 근거가 포함된 의사결정 보고서를 자동 생성합니다.</div>
-          <span class="sval">다중 옵션 비교 → 최적안 추천 → 보고서 자동 생성</span>
-        </div>
-      </div>
-      <div class="scn">
-        <div class="sn">2</div>
-        <div>
-          <div class="sh">원자재 가격 급등 대응</div>
-          <div class="sd">원자재 가격이 급등할 때 영향을 받는 SKU와 <strong>적자로 전환되는 품목을 선제적으로 자동 식별</strong>하여, 담당자가 출근하기 전에 대응이 필요한 품목을 알립니다.</div>
-          <span class="sval">위험 감지 → 영향 SKU·적자 품목 자동 식별 → 선제 알림</span>
-        </div>
-      </div>
-      <div class="scn">
-        <div class="sn">3</div>
-        <div>
-          <div class="sh">신규 수주 기회 최적화</div>
-          <div class="sd">신규 견적·수주 기회가 발생했을 때 라인 가용성과 누적 순이익을 분석하여, <strong>손실을 방지하고 이윤을 최적화하는 수주 구조</strong>를 설계합니다.</div>
-          <span class="sval">라인 가용성·누적 순이익 분석 → 최적 수주 구조 설계</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- CONCEPT -->
-<section class="block" id="concept">
-  <div class="narrow">
-    <div class="section-eyebrow">04 — System Concept</div>
-    <h2 class="section-title">Multi-Agent 시스템 개념</h2>
-    <p class="section-lead">스마트 공장의 Multi-Agent는 네 가지 핵심 역할을 협력적으로 수행하며, 사용자는 자연어 질의와 대시보드를 통해 시스템과 상호작용합니다.</p>
-
-    <div class="card" style="margin-top:24px;">
-      <h3>핵심 역할</h3>
-      <div class="role-grid">
-        <div class="role"><div class="ri">📡</div><div class="rh">실시간 데이터 수집</div><div class="rd">생산·자재·주문·재고·원가 데이터를 실시간으로 수집합니다.</div></div>
-        <div class="role"><div class="ri">🔎</div><div class="rh">실시간 상황 인지</div><div class="rd">수집된 데이터에서 위험·기회 상황을 실시간으로 인지합니다.</div></div>
-        <div class="role"><div class="ri">🧭</div><div class="rh">생산 전략 계획</div><div class="rd">비용 최소화·이익 극대화 관점에서 생산·제조 전략을 수립합니다.</div></div>
-        <div class="role"><div class="ri">🎯</div><div class="rh">경영 의사결정 지원</div><div class="rd">근거 데이터와 함께 최적안을 제시하여 경영 의사결정을 지원합니다.</div></div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:20px;">
-      <h3>사용자 접점 — 자연어 질의 + 대시보드</h3>
-      <p>사용자는 별도의 폼·그리드 입력 없이 <strong>자연어로 질문</strong>하고, 시스템은 <strong>대시보드</strong>로 다중 옵션 분석과 추천 근거를 시각화하여 답합니다.</p>
-      <div class="callout">
-        <div class="ct">🤝 Human-in-the-loop</div>
-        <p>Agent는 데이터를 분석하고 최적안을 <strong>제안</strong>하며, <strong>최종 결정은 사람</strong>이 합니다. 모든 추천에는 근거 데이터가 기록되어 사후 검토와 추적이 가능합니다.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- USAGE -->
-<section class="block" id="usage">
-  <div class="narrow">
-    <div class="section-eyebrow">05 — Usage</div>
-    <h2 class="section-title">사용자 시스템 사용 시나리오</h2>
-    <p class="section-lead">사용자가 실제로 시스템을 사용하는 두 가지 핵심 흐름입니다 — 기초 데이터를 시스템에 넣는 과정, 그리고 PO(발주) 정보를 전달해 생산 계획을 제안받는 과정.</p>
-
-    <!-- UC1 -->
-    <div class="card" style="margin-top:24px;">
-      <div class="phase-head" style="margin-bottom:12px;">
-        <div class="phase-no">📥</div>
-        <div><div class="ttl">1. 기초 데이터 입력</div></div>
-      </div>
-      <p>두 가지 경로로 데이터를 시스템에 등록합니다.</p>
-      <div class="inch-grid">
-        <div class="inch">
-          <div class="ich">🔌 MES · ERP — 실시간 자동 수집</div>
-          <div class="icd">MES·ERP 데이터는 <b>MCP</b>를 이용해 실시간으로 기초 데이터를 자동으로 받아옵니다. (라인 가동률·가용 시간, 자재 재고·리드타임, SKU 마진·원가, 진행 중 주문 등)</div>
-          <div class="ac-tools" style="margin-top:11px;"><span class="tbadge mcp">🔌 MCP · 실시간</span></div>
-        </div>
-        <div class="inch">
-          <div class="ich">📄 레거시 문서 — 원본 그대로 등록</div>
-          <div class="icd">그 외 레거시 시스템에서 생성되는 자료는 <b>원본 문서를 그대로 추가하여 등록</b>할 수 있습니다. (영업일지, 과거 의사결정 보고서, BOM·라우팅 등) 비정형 자료는 전처리·벡터화되어 RAG로 활용됩니다.</div>
-          <div class="docchips"><span class="docchip">.docx</span><span class="docchip">.xlsx</span><span class="docchip">.pdf 등</span></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- UC2 -->
-    <div class="card" style="margin-top:20px;">
-      <div class="phase-head" style="margin-bottom:12px;">
-        <div class="phase-no">🧭</div>
-        <div><div class="ttl">2. Agent의 생산 계획 제안</div></div>
-      </div>
-      <p><strong>PO(Purchase Order, 발주) 정보</strong>를 텍스트 또는 문서 원본 그대로 Agent에 전달하면, Agent가 생산 계획을 검토한 뒤 제안합니다.</p>
-      <div class="uflow">
-        <div class="ustep">
-          <div class="un">INPUT</div>
-          <div class="ut">PO 정보 전달</div>
-          <div class="ud">발주 메일·문서를 텍스트 또는 원본 그대로 전달 (자연어 질의도 가능)</div>
-        </div>
-        <div class="uarrow">→</div>
-        <div class="ustep">
-          <div class="un">PROCESS</div>
-          <div class="ut">생산 계획 검토</div>
-          <div class="ud">라인 가용성·자재·원가·납기를 종합해 다중 옵션을 순이익·리스크로 비교</div>
-        </div>
-        <div class="uarrow">→</div>
-        <div class="ustep">
-          <div class="un">OUTPUT</div>
-          <div class="ut">생산 계획 제안</div>
-          <div class="ud">최적안 추천 + 근거 데이터 + 의사결정 보고서 자동 생성</div>
-        </div>
-      </div>
-      <div class="callout">
-        <div class="ct">📧 입력 예시 — 발주/긴급 요청을 그대로 전달</div>
-        <p><strong>제목</strong> [긴급/회신요청] GS-201 가스켓 2주간 30% 증산 검토 요청<br/><strong>본문</strong> 증산 기간 6/3~6/16(2주) · 일 평균 +15,000개(+30%) · 회신 마감 오늘 18시<br/>→ Agent가 내용을 분석해 라인 전환·야간 가동·외주 등 옵션을 비교하고, 근거와 함께 최적안을 제안합니다.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- PROCESS / GANTT -->
+<!-- PROCESS -->
 <section class="block" id="process">
   <div class="container">
     <div class="narrow" style="padding-left:0;padding-right:0;">
-      <div class="section-eyebrow">06 — Process</div>
-      <h2 class="section-title">PoC 진행 절차 · 8주</h2>
+      <div class="section-eyebrow">05 — Development Plan</div>
+      <h2 class="section-title">개발 계획 · 8주</h2>
       <p class="section-lead">데이터 수집·전처리부터 Agent 설계, Multi-Agent System 설계, 현장 시연·운영 교육까지 8주에 걸쳐 진행하며, 각 단계는 일부 기간을 중첩하여 동시에 진행합니다.</p>
     </div>
 
@@ -605,7 +578,44 @@
   </div>
 </section>
 
-<!-- PHASE 1 -->
+<!-- CONCEPT -->
+<section class="block" id="concept">
+  <div class="narrow">
+    <div class="section-eyebrow">06 — System Concept</div>
+    <h2 class="section-title">Multi-Agent 시스템 개념</h2>
+    <p class="section-lead">스마트 공장의 Multi-Agent는 네 가지 핵심 역할을 협력적으로 수행하며, 사용자는 자연어 질의와 대시보드를 통해 시스템과 상호작용합니다.</p>
+
+    <div class="card" style="margin-top:24px;">
+      <h3>핵심 역할</h3>
+      <div class="role-grid">
+        <div class="role"><div class="ri">📡</div><div class="rh">실시간 데이터 수집</div><div class="rd">생산·자재·주문·재고·원가 데이터를 실시간으로 수집합니다.</div></div>
+        <div class="role"><div class="ri">🔎</div><div class="rh">실시간 상황 인지</div><div class="rd">수집된 데이터에서 위험·기회 상황을 실시간으로 인지합니다.</div></div>
+        <div class="role"><div class="ri">🧭</div><div class="rh">생산 전략 계획</div><div class="rd">비용 최소화·이익 극대화 관점에서 생산·제조 전략을 수립합니다.</div></div>
+        <div class="role"><div class="ri">🎯</div><div class="rh">경영 의사결정 지원</div><div class="rd">근거 데이터와 함께 최적안을 제시하여 경영 의사결정을 지원합니다.</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h3>사용자 접점 — 자연어 질의 + 대시보드</h3>
+      <p>사용자는 별도의 폼·그리드 입력 없이 <strong>자연어로 질문</strong>하고, 시스템은 <strong>대시보드</strong>로 다중 옵션 분석과 추천 근거를 시각화하여 답합니다.</p>
+      <div class="callout">
+        <div class="ct">🤝 Human-in-the-loop</div>
+        <p>Agent는 데이터를 분석하고 최적안을 <strong>제안</strong>하며, <strong>최종 결정은 사람</strong>이 합니다. 모든 추천에는 근거 데이터가 기록되어 사후 검토와 추적이 가능합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MILESTONES INTRO -->
+<section class="block" id="milestones">
+  <div class="narrow">
+    <div class="section-eyebrow">07 — Milestones in Detail</div>
+    <h2 class="section-title">마일스톤 상세</h2>
+    <p class="section-lead">데이터 수집·전처리부터 Agent·Multi-Agent System 개발, 시연·운영 교육까지 각 단계의 상세 내용입니다.</p>
+  </div>
+</section>
+
+<!-- PHASE1 -->
 <section class="block" id="phase1">
   <div class="narrow">
     <div class="phase-head">
@@ -710,7 +720,7 @@
   </div>
 </section>
 
-<!-- PHASE 2 -->
+<!-- PHASE2 -->
 <section class="block" id="phase2">
   <div class="narrow">
     <div class="phase-head">
@@ -817,7 +827,7 @@
   </div>
 </section>
 
-<!-- PHASE 3 -->
+<!-- PHASE3 -->
 <section class="block" id="phase3">
   <div class="narrow">
     <div class="phase-head">
@@ -849,7 +859,7 @@
   </div>
 </section>
 
-<!-- PHASE 4 -->
+<!-- PHASE4 -->
 <section class="block" id="phase4">
   <div class="narrow">
     <div class="phase-head">
@@ -878,7 +888,7 @@
 <!-- GOVERNANCE -->
 <section class="block" id="governance">
   <div class="narrow">
-    <div class="section-eyebrow">07 — Security &amp; Governance</div>
+    <div class="section-eyebrow">08 — Security &amp; Governance</div>
     <h2 class="section-title">보안 · 거버넌스</h2>
     <p class="section-lead">고객사의 민감 데이터를 안전하게 보호하고, 의사결정의 책임성과 추적성을 보장합니다.</p>
 
