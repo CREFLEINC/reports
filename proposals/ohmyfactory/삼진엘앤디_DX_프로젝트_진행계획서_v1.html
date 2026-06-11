@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>삼진엘앤디 DX 프로젝트 진행 계획서 · CREFLE</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>deck-stage:not(:defined){visibility:hidden}</style>
+<style>
+  /* Material Symbols를 로컬 번들로 — CDN 불가 환경에서도 아이콘이 원시
+     텍스트(ligature 이름)로 깨지지 않도록 함. 이 선언이 colors_and_type.css의
+     CDN @import보다 뒤에 와서 우선한다. */
+  @font-face {
+    font-family: "Material Symbols Rounded";
+    src: url("fonts/MaterialSymbolsRounded.woff2") format("woff2");
+    font-weight: 100 700;
+    font-style: normal;
+    font-display: block;
+  }
+
+  body { margin: 0; background: #0a0a0f; color: var(--on-surface); }
+
+  /* ── Per-slide internals (1920×1080 canvas; deck-stage scales) ── */
+  .slide {
+    width: 1920px; height: 1080px;
+    background: var(--surface);
+    color: var(--on-surface);
+    font-family: var(--font-sans);
+    word-break: keep-all;
+    position: relative;
+    overflow: hidden;
+  }
+  .slide.dark {
+    background: linear-gradient(135deg, #1A1C2E 0%, #2E4090 55%, #4758A9 100%);
+    color: #fff;
+  }
+  .slide.dark-red {
+    background: linear-gradient(135deg, #7D161B 0%, #A81E24 40%, #C9252C 100%);
+    color: #fff;
+  }
+  .slide.dark::before, .slide.dark-red::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right,  rgba(255,255,255,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .foot {
+    position: absolute; left: var(--slide-gutter); right: var(--slide-gutter);
+    bottom: 40px; display: flex; align-items: center; justify-content: space-between;
+    font: var(--w-regular) 16px/1 var(--font-mono);
+    color: var(--on-surface-muted);
+  }
+  .slide.dark .foot, .slide.dark-red .foot { color: rgba(255,255,255,0.65); }
+  .foot .pageno { letter-spacing: 0.08em; }
+
+  .stage {
+    position: absolute;
+    inset: 80px var(--slide-gutter) 100px var(--slide-gutter);
+    display: flex; flex-direction: column;
+  }
+
+  .eyebrow { font: 500 28px/1 var(--font-sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--primary); }
+  .slide.dark .eyebrow { color: var(--brand-accent-1); }
+  .slide.dark-red .eyebrow { color: rgba(255,255,255,0.85); }
+  h1.title { font: 700 88px/1.1 var(--font-sans); letter-spacing: -0.02em; margin: 32px 0 0; }
+  h2.section { font: 700 64px/1.1 var(--font-sans); letter-spacing: -0.02em; margin: 24px 0 0; }
+  h3.sub { font: 500 40px/1.2 var(--font-sans); margin: 0; }
+  .lede { font: 400 28px/1.5 var(--font-sans); color: var(--on-surface-variant); max-width: 1500px; }
+  .slide.dark .lede { color: var(--brand-accent-3); }
+  .slide.dark-red .lede { color: rgba(255,255,255,0.88); }
+
+  .card-outline { background: var(--surface-bright); border: 1px solid var(--outline-variant); border-radius: var(--radius-md); box-shadow: var(--elev-1); padding: 32px 36px; }
+  .card-filled  { background: var(--surface-container-low); border-radius: var(--radius-md); padding: 32px 36px; }
+
+  .capsule { display:inline-flex; align-items:center; gap:10px; padding: 12px 24px; background: rgba(15,15,26,0.55); border:1px solid rgba(255,255,255,0.18); border-radius: var(--radius-pill); color:#fff; font: 500 22px/1 var(--font-sans); }
+
+  /* Icon chip used on feature / cooperation cards */
+  .icon-chip {
+    width: 72px; height: 72px; border-radius: var(--radius-lg);
+    background: var(--primary-container); color: var(--on-primary-container);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-chip .ms { font-size: 40px; }
+
+  .num-eyebrow { font: 500 18px/1 var(--font-mono); letter-spacing: 0.14em; color: var(--primary); }
+
+  /* ── Gantt (slide 07) ── */
+  .gantt { margin-top: 56px; }
+  .g-head, .g-row { display: grid; grid-template-columns: 360px 1fr; align-items: center; }
+  .g-scale { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .g-scale span { font: 400 17px/1 var(--font-mono); color: var(--on-surface-muted); padding-left: 8px; }
+  .g-row { height: 62px; }
+  .g-label { font: 500 23px/1.25 var(--font-sans); padding-right: 24px; }
+  .g-label .dates { display: block; font: 400 15px/1.3 var(--font-mono); color: var(--on-surface-muted); margin-top: 3px; }
+  .g-track {
+    position: relative; height: 46px; align-self: center;
+    background-image: linear-gradient(to right, var(--outline-variant) 1px, transparent 1px);
+    background-size: calc(100% / 7) 100%;
+    border-right: 1px solid var(--outline-variant);
+  }
+  .g-bar {
+    position: absolute; top: 6px; height: 34px;
+    border-radius: var(--radius-sm);
+  }
+  .b-design { background: var(--primary-container); }
+  .b-dev    { background: var(--primary); }
+  .b-ship   { background: var(--brand-red); }
+  .legend { display: flex; gap: 32px; margin-top: 36px; align-items: center; }
+  .legend .key { display: inline-flex; align-items: center; gap: 10px; font: 400 19px/1 var(--font-sans); color: var(--on-surface-variant); }
+  .legend .swatch { width: 18px; height: 18px; border-radius: 5px; }
+
+  /* ── Document list (slide 05) ── */
+  .doc-card h4 { margin: 0 0 20px; font: 700 28px/1.2 var(--font-sans); display: flex; align-items: center; gap: 14px; }
+  .doc-card h4 .count { font: 500 17px/1 var(--font-mono); color: var(--on-primary-container); background: var(--primary-container); padding: 6px 14px; border-radius: var(--radius-pill); }
+  .doc-card ol { margin: 0; padding: 0; list-style: none; }
+  .doc-card li { font: 400 19px/1.85 var(--font-sans); color: var(--on-surface-variant); display: flex; gap: 12px; }
+  .doc-card li .no { font: 400 16px/1.95 var(--font-mono); color: var(--on-surface-muted); min-width: 26px; text-align: right; flex-shrink: 0; }
+
+  /* ── Team (slide 08) ── */
+  .role-card { display: flex; flex-direction: column; gap: 12px; }
+  .role-card .role { font: 500 20px/1 var(--font-sans); letter-spacing: 0.1em; text-transform: uppercase; color: var(--primary); }
+  .role-card .name { font: 700 40px/1.15 var(--font-sans); letter-spacing: -0.02em; }
+  .role-card .note { font: 400 19px/1.4 var(--font-sans); color: var(--on-surface-muted); }
+  .badge-dedicated {
+    align-self: flex-start; padding: 7px 16px; border-radius: var(--radius-pill);
+    background: var(--primary-container); color: var(--on-primary-container);
+    font: 500 17px/1 var(--font-sans);
+  }
+</style>
+</head>
+<body>
+
+<script type="application/json" id="speaker-notes">[
+  "삼진엘앤디 제조팀 DX 프로젝트 착수 브리핑. 작성 2026-06-10, 납기 7/31(금).",
+  "한 문장 요약: 종이·엑셀로 흩어진 제조팀 기록을 입력-표준화-보고서까지 하나의 시스템으로. 핵심 숫자 3개 — 28종, 7/31, 동탄 본사.",
+  "개발 범위는 세 기능 영역. 입력의 디지털화 → 정보의 표준화 → 열람·보고서 생성 순으로 데이터가 흐른다.",
+  "대상은 2025년 BPA 디지털조사에서 정리된 글로벌제조팀 자료. 종이 작성 문서 28종 — 사출 20, 조립 4, 금형 4.",
+  "28종 전체 목록. 상세 업무 내용과 현행 PC 이동 방법(엑셀 타이핑, POP→MES 등)은 데이터 모델링 단계에서 활용.",
+  "착수 전 삼진엘앤디 측 준비 사항 세 가지. 자료 수집일 6/15까지 모이면 일정 그대로 진행 가능. 보고서는 '어떤 내용이 포함된 어떤 보고서'까지만 정리해 주시면 디자인 형식은 크레플이 제시.",
+  "7주 일정. 설계(파랑 연한색) → 개발(파랑) → 검증·납품(빨강). 서버 개발은 6/22부터 UI 설계·사용자 프로그램 개발과 병행 4주. 모든 날짜는 2026년 평일 기준.",
+  "크레플 투입 4인. 유예솔 대리 전담 투입이 일정의 전제 조건.",
+  "마무리 — 7/31(금) 동탄 본사 설치·운영 교육 완료 약속. 다음 단계는 6/15(월) 자료 수집."
+]</script>
+
+<deck-stage>
+
+  <!-- 01 · TITLE ─────────────────────────────────────────────────── -->
+  <section data-label="Title" class="slide dark">
+    <div class="stage" style="justify-content: center;">
+      <img src="assets/crefle-wordmark-inverse.svg" alt="CREFLE" style="height: 64px; width: auto; margin-bottom: 64px; align-self: flex-start;">
+      <div class="eyebrow">SAMJIN L&amp;D · DX PROJECT</div>
+      <h1 class="title" style="color:#fff; max-width: 1600px;">삼진엘앤디 디지털 전환(DX)<br>프로젝트 진행 계획서</h1>
+      <p class="lede" style="margin-top: 40px;">
+        제조팀 종이 문서 28종의 디지털화·표준화 — 정보 입력부터 보고서 생성까지.
+      </p>
+      <div style="margin-top: 64px; display:flex; gap: 16px;">
+        <span class="capsule">2026. 6. 10 · 크레플 주식회사</span>
+        <span class="capsule">납기 2026. 7. 31 (금)</span>
+        <span class="capsule">삼진엘앤디 동탄 본사</span>
+      </div>
+    </div>
+    <div class="foot">
+      <span>CREFLE Inc.</span>
+      <span class="pageno">01 / 09</span>
+    </div>
+  </section>
+
+  <!-- 02 · 프로젝트 개요 ─────────────────────────────────────────── -->
+  <section data-label="프로젝트 개요" class="slide">
+    <div class="stage">
+      <div class="eyebrow">프로젝트 개요</div>
+      <h2 class="section">흩어진 현장 기록을 하나의 시스템으로</h2>
+      <p class="lede" style="margin-top: 24px;">
+        제조팀이 종이 문서와 개별 엑셀 파일로 관리하는 현장 정보를 디지털화·표준화하고,
+        수집된 데이터를 열람(조회)하고 표준화된 보고서로 생성하는 시스템을 구축.
+      </p>
+
+      <div style="margin-top: 72px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px;">
+        <div class="card-outline">
+          <div class="eyebrow" style="font-size:18px;">디지털 전환 대상</div>
+          <div style="font: 700 84px/1 var(--font-sans); letter-spacing:-0.02em; margin-top: 20px;">28종</div>
+          <div style="font: 400 20px/1.4 var(--font-sans); color: var(--on-surface-muted); margin-top: 16px;">제조팀 종이 작성 문서 전체</div>
+        </div>
+        <div class="card-outline">
+          <div class="eyebrow" style="font-size:18px;">마감 목표일</div>
+          <div style="font: 700 84px/1 var(--font-sans); letter-spacing:-0.02em; margin-top: 20px;">7. 31.</div>
+          <div style="font: 400 20px/1.4 var(--font-sans); color: var(--on-surface-muted); margin-top: 16px;">2026년 7월 31일 금요일</div>
+        </div>
+        <div class="card-outline">
+          <div class="eyebrow" style="font-size:18px;">최종 산출물</div>
+          <div style="font: 700 56px/1.15 var(--font-sans); letter-spacing:-0.02em; margin-top: 20px;">동탄 본사<br>설치 완료</div>
+          <div style="font: 400 20px/1.4 var(--font-sans); color: var(--on-surface-muted); margin-top: 16px;">시스템 설치 · 운영 교육 포함</div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">02 / 09</span>
+    </div>
+  </section>
+
+  <!-- 03 · 개발 범위 ─────────────────────────────────────────────── -->
+  <section data-label="개발 범위" class="slide">
+    <div class="stage">
+      <div class="eyebrow">개발 범위</div>
+      <h2 class="section">세 가지 기능 영역</h2>
+      <p class="lede" style="margin-top: 24px;">현장의 기록이 입력 → 표준화 → 보고서의 순서로 흐른다.</p>
+
+      <div style="margin-top: 72px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px;">
+        <div class="card-outline" style="display:flex; flex-direction:column; gap:24px; padding: 44px 40px;">
+          <div class="icon-chip"><span class="ms">edit_note</span></div>
+          <div class="num-eyebrow">01</div>
+          <h3 class="sub">정보 입력의 디지털화</h3>
+          <p style="margin:0; font: 400 23px/1.55 var(--font-sans); color: var(--on-surface-variant);">
+            종이 문서로 기록되는 정보를 컴퓨터 또는 휴대용 디바이스로 입력할 수 있도록 개발.
+          </p>
+        </div>
+        <div class="card-outline" style="display:flex; flex-direction:column; gap:24px; padding: 44px 40px;">
+          <div class="icon-chip"><span class="ms">schema</span></div>
+          <div class="num-eyebrow">02</div>
+          <h3 class="sub">디지털 정보 표준화</h3>
+          <p style="margin:0; font: 400 23px/1.55 var(--font-sans); color: var(--on-surface-variant);">
+            개별 엑셀 파일처럼 정형화되지 않은 정보를 표준화 모델링하고, 동일한 방식으로 입력할 수 있도록 개발.
+          </p>
+        </div>
+        <div class="card-outline" style="display:flex; flex-direction:column; gap:24px; padding: 44px 40px;">
+          <div class="icon-chip"><span class="ms">lab_profile</span></div>
+          <div class="num-eyebrow">03</div>
+          <h3 class="sub">정보 열람 · 보고서 생성</h3>
+          <p style="margin:0; font: 400 23px/1.55 var(--font-sans); color: var(--on-surface-variant);">
+            수집된 데이터를 열람(조회)하고, 표준화된 형식의 보고서로 생성.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">03 / 09</span>
+    </div>
+  </section>
+
+  <!-- 04 · 디지털 전환 대상 ──────────────────────────────────────── -->
+  <section data-label="디지털 전환 대상" class="slide">
+    <div class="stage">
+      <div class="eyebrow">디지털 전환 대상</div>
+      <h2 class="section">제조팀 종이 작성 문서 28종</h2>
+      <p class="lede" style="margin-top: 24px;">2025년 정리된 BPA 디지털조사 자료 중 "제조팀" 자료 기준.</p>
+
+      <div style="margin-top: 72px; display: grid; grid-template-columns: 480px 1fr; gap: 64px; align-items: center;">
+        <div class="card-filled" style="padding: 56px 48px; text-align: center;">
+          <div style="font: 700 200px/1 var(--font-sans); letter-spacing: -0.04em; color: var(--primary);">28</div>
+          <div style="font: 500 28px/1.3 var(--font-sans); margin-top: 16px;">종이 작성 문서 전체</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 40px;">
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span style="font: 500 30px/1 var(--font-sans);">사출</span>
+              <span style="font: 700 36px/1 var(--font-sans); color: var(--primary);">20종</span>
+            </div>
+            <div style="margin-top: 14px; height: 30px; border-radius: var(--radius-sm); background: var(--surface-container);">
+              <div style="width: 100%; height: 100%; border-radius: var(--radius-sm); background: var(--primary);"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span style="font: 500 30px/1 var(--font-sans);">조립</span>
+              <span style="font: 700 36px/1 var(--font-sans); color: var(--primary);">4종</span>
+            </div>
+            <div style="margin-top: 14px; height: 30px; border-radius: var(--radius-sm); background: var(--surface-container);">
+              <div style="width: 20%; height: 100%; border-radius: var(--radius-sm); background: var(--primary);"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span style="font: 500 30px/1 var(--font-sans);">금형</span>
+              <span style="font: 700 36px/1 var(--font-sans); color: var(--primary);">4종</span>
+            </div>
+            <div style="margin-top: 14px; height: 30px; border-radius: var(--radius-sm); background: var(--surface-container);">
+              <div style="width: 20%; height: 100%; border-radius: var(--radius-sm); background: var(--primary);"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">04 / 09</span>
+    </div>
+  </section>
+
+  <!-- 05 · 대상 문서 목록 ────────────────────────────────────────── -->
+  <section data-label="대상 문서 목록" class="slide">
+    <div class="stage">
+      <div class="eyebrow">디지털 전환 대상</div>
+      <h2 class="section" style="font-size: 56px;">대상 문서 전체 목록</h2>
+
+      <div style="margin-top: 48px; display: grid; grid-template-columns: 2fr 1fr; gap: 32px; align-items: start;">
+        <div class="card-outline doc-card">
+          <h4>사출 <span class="count">20종</span></h4>
+          <ol style="columns: 2; column-gap: 48px;">
+            <li><span class="no">1</span>생산일보</li>
+            <li><span class="no">2</span>초중종물 체크시트</li>
+            <li><span class="no">3</span>금형수리 의뢰서</li>
+            <li><span class="no">4</span>재고이동현황</li>
+            <li><span class="no">5</span>사출설비 점검표</li>
+            <li><span class="no">6</span>기종 변경 체크시트</li>
+            <li><span class="no">7</span>사출 조건표</li>
+            <li><span class="no">8</span>공정 패트롤 체크시트</li>
+            <li><span class="no">9</span>3정 5S 카렌다</li>
+            <li><span class="no">10</span>온/습도 체크시트</li>
+            <li><span class="no">11</span>냉각수 온도 추이도</li>
+            <li><span class="no">12</span>비전기 체크시트</li>
+            <li><span class="no">13</span>인서트 공급기 체크시트</li>
+            <li><span class="no">14</span>라벨/QR 체크시트</li>
+            <li><span class="no">15</span>지그 관리 체크시트</li>
+            <li><span class="no">16</span>마스터 샘플 체크시트</li>
+            <li><span class="no">17</span>부적합품 관리 체크시트</li>
+            <li><span class="no">18</span>부적합품 작업자 교육 보고서</li>
+            <li><span class="no">19</span>마이머신 점검표</li>
+            <li><span class="no">20</span>휴가 신청서</li>
+          </ol>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 32px;">
+          <div class="card-outline doc-card">
+            <h4>조립 <span class="count">4종</span></h4>
+            <ol>
+              <li><span class="no">21</span>버스바장비·통전·비젼 설비점검표</li>
+              <li><span class="no">22</span>통전·비젼 마스터 설비점검표</li>
+              <li><span class="no">23</span>5S 카렌다</li>
+              <li><span class="no">24</span>온습도 관리대장</li>
+            </ol>
+          </div>
+          <div class="card-outline doc-card">
+            <h4>금형 <span class="count">4종</span></h4>
+            <ol>
+              <li><span class="no">25</span>작업일보</li>
+              <li><span class="no">26</span>범용설비 점검표</li>
+              <li><span class="no">27</span>금형 일상·정기점검</li>
+              <li><span class="no">28</span>CNC설비점검표</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">05 / 09</span>
+    </div>
+  </section>
+
+  <!-- 06 · 협조 요청 사항 ────────────────────────────────────────── -->
+  <section data-label="협조 요청 사항" class="slide">
+    <div class="stage">
+      <div class="eyebrow">삼진엘앤디 협조 요청 사항</div>
+      <h2 class="section">착수 시점에 필요한 세 가지</h2>
+      <p class="lede" style="margin-top: 24px;">자료 수집 목표일 6월 15일(월) — 아래 세 가지가 모이면 일정대로 착수 가능.</p>
+
+      <div style="margin-top: 72px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px;">
+        <div class="card-outline" style="display:flex; flex-direction:column; gap:24px; padding: 44px 40px;">
+          <div class="icon-chip"><span class="ms">folder_shared</span></div>
+          <h3 class="sub">데이터 수집</h3>
+          <p style="margin:0; font: 400 23px/1.55 var(--font-sans); color: var(--on-surface-variant);">
+            종이 문서 및 엑셀 파일로 관리되는 디지털화 대상 자료 일체.
+          </p>
+        </div>
+        <div class="card-outline" style="display:flex; flex-direction:column; gap:24px; padding: 44px 40px;">
+          <div class="icon-chip"><span class="ms">account_tree</span></div>
+          <h3 class="sub">업무 프로세스 정리</h3>
+          <p style="margin:0; font: 400 23px/1.55 var(--font-sans); color: var(--on-surface-variant);">
+            현재 데이터의 처리 과정 정리 — 최대한 상세할수록 모델링이 정확해진다.
+          </p>
+        </div>
+        <div class="card-outline" style="display:flex; flex-direction:column; gap:24px; padding: 44px 40px;">
+          <div class="icon-chip"><span class="ms">summarize</span></div>
+          <h3 class="sub">보고서 양식 정의</h3>
+          <p style="margin:0; font: 400 23px/1.55 var(--font-sans); color: var(--on-surface-variant);">
+            어떤 내용이 포함된 어떤 보고서가 필요한지 정의 — 디자인 형식은 크레플이 제시.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">06 / 09</span>
+    </div>
+  </section>
+
+  <!-- 07 · 추진 일정 ─────────────────────────────────────────────── -->
+  <section data-label="추진 일정" class="slide">
+    <div class="stage">
+      <div class="eyebrow">추진 일정</div>
+      <h2 class="section" style="font-size: 56px;">6월 15일 착수 — 7월 31일 납품, 7주</h2>
+
+      <div class="gantt">
+        <div class="g-head">
+          <span style="font: 500 17px/1 var(--font-mono); color: var(--on-surface-muted);">주차 (월요일 기준)</span>
+          <div class="g-scale">
+            <span>6/15</span><span>6/22</span><span>6/29</span><span>7/6</span><span>7/13</span><span>7/20</span><span>7/27</span>
+          </div>
+        </div>
+
+        <div class="g-row" style="margin-top: 16px;">
+          <div class="g-label">1 · 자료 수집<span class="dates">6/15 (월)</span></div>
+          <div class="g-track"><div class="g-bar b-design" style="left: 0%; width: 2.857%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">2 · 데이터 모델링 · 서버 설계<span class="dates">6/16 (화) – 6/19 (금)</span></div>
+          <div class="g-track"><div class="g-bar b-design" style="left: 2.857%; width: 11.429%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">3 · 사용자 인터페이스 설계 1차<span class="dates">6/22 (월) – 6/26 (금)</span></div>
+          <div class="g-track"><div class="g-bar b-design" style="left: 14.286%; width: 14.286%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">4 · 사용자 인터페이스 설계 최종<span class="dates">6/29 (월) – 7/3 (금)</span></div>
+          <div class="g-track"><div class="g-bar b-design" style="left: 28.571%; width: 14.286%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">5 · 사용자 프로그램 개발<span class="dates">7/6 (월) – 7/17 (금) · 2주</span></div>
+          <div class="g-track"><div class="g-bar b-dev" style="left: 42.857%; width: 28.571%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">6 · 서버 개발 — 3~5와 병행<span class="dates">6/22 (월) – 7/17 (금) · 4주</span></div>
+          <div class="g-track"><div class="g-bar b-dev" style="left: 14.286%; width: 57.143%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">7 · 배포 준비<span class="dates">7/20 (월) – 7/24 (금)</span></div>
+          <div class="g-track"><div class="g-bar b-ship" style="left: 71.429%; width: 14.286%;"></div></div>
+        </div>
+        <div class="g-row">
+          <div class="g-label">8 · 납품 및 운영 교육<span class="dates">7/27 (월) – 7/31 (금)</span></div>
+          <div class="g-track"><div class="g-bar b-ship" style="left: 85.714%; width: 14.286%;"></div></div>
+        </div>
+
+        <div class="legend">
+          <span class="key"><span class="swatch b-design"></span>분석 · 설계</span>
+          <span class="key"><span class="swatch b-dev"></span>개발 · 통합 테스트</span>
+          <span class="key"><span class="swatch b-ship"></span>검증 · 납품</span>
+          <span class="key" style="margin-left: auto; color: var(--on-surface-muted);">모든 일정은 2026년 평일(월–금) 기준</span>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">07 / 09</span>
+    </div>
+  </section>
+
+  <!-- 08 · 프로젝트 팀 구성 ──────────────────────────────────────── -->
+  <section data-label="프로젝트 팀 구성" class="slide">
+    <div class="stage">
+      <div class="eyebrow">프로젝트 팀 구성</div>
+      <h2 class="section">크레플 투입 인력 4인</h2>
+
+      <div style="margin-top: 72px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px;">
+        <div class="card-outline role-card" style="padding: 44px 48px;">
+          <div class="role">총괄 책임</div>
+          <div class="name">서은석 <span style="font-weight:400; font-size:30px; color:var(--on-surface-muted);">대표</span></div>
+          <div class="note">프로젝트 총괄 의사결정</div>
+        </div>
+        <div class="card-outline role-card" style="padding: 44px 48px;">
+          <div class="role">PM · 제품 개발 총괄</div>
+          <div class="name">김정규 <span style="font-weight:400; font-size:30px; color:var(--on-surface-muted);">CTO</span></div>
+          <div class="note">일정 · 요구사항 · 품질 관리</div>
+        </div>
+        <div class="card-outline role-card" style="padding: 44px 48px; border-color: var(--primary);">
+          <div class="role">S/W Engineer · 주담당</div>
+          <div class="name">유예솔 <span style="font-weight:400; font-size:30px; color:var(--on-surface-muted);">대리</span></div>
+          <div class="badge-dedicated">프로젝트 전담 투입</div>
+        </div>
+        <div class="card-outline role-card" style="padding: 44px 48px;">
+          <div class="role">S/W Engineer · 부담당</div>
+          <div class="name">조현진 <span style="font-weight:400; font-size:30px; color:var(--on-surface-muted);">사원</span></div>
+          <div class="note">주담당 지원 · 단위 테스트</div>
+        </div>
+      </div>
+
+      <p style="margin: 48px 0 0; font: 400 23px/1.5 var(--font-sans); color: var(--on-surface-variant);">
+        본 추진 일정은 유예솔 대리의 프로젝트 전담 투입을 전제로 한다.
+      </p>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">08 / 09</span>
+    </div>
+  </section>
+
+  <!-- 09 · CLOSING ───────────────────────────────────────────────── -->
+  <section data-label="Closing" class="slide dark-red">
+    <div aria-hidden="true" style="position:absolute; right:-40px; bottom:-120px; font: 700 560px/1 var(--font-sans); letter-spacing: -0.04em; color: rgba(255,255,255,0.07); pointer-events:none; user-select:none;">7.31</div>
+    <div class="stage" style="justify-content: center;">
+      <div class="eyebrow">마감 목표</div>
+      <h2 class="section" style="color:#fff; font-size: 88px; line-height: 1.15; margin-top: 40px; max-width: 1500px;">
+        2026년 7월 31일(금),<br>동탄 본사 — 시스템 설치와<br>운영 교육까지 완료
+      </h2>
+      <div style="margin-top: 72px; display:flex; gap: 16px;">
+        <span class="capsule">다음 단계 — 6/15 (월) 디지털 전환 대상 자료 수집</span>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark-white.svg" alt="" style="width:28px; height:28px; opacity:0.85;">
+      <span class="pageno">09 / 09</span>
+    </div>
+  </section>
+
+</deck-stage>
+
+<script src="deck-stage.js"></script>
+</body>
+</html>
