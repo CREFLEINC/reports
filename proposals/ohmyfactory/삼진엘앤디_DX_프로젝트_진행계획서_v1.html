@@ -129,6 +129,21 @@
     background: var(--primary-container); color: var(--on-primary-container);
     font: 500 17px/1 var(--font-sans);
   }
+
+  /* ── 비나 MES 워크플로우 (slide 11) ── */
+  .step-card { display: flex; flex-direction: column; gap: 14px; padding: 32px 28px; }
+  .step-card .step-title { font: 700 26px/1.3 var(--font-sans); margin: 0; min-height: 68px; }
+  .step-card .chip { display: inline-block; padding: 6px 14px; border-radius: var(--radius-pill); font: 500 17px/1 var(--font-sans); margin-right: 6px; }
+  .chip-crefle { background: var(--primary-container); color: var(--on-primary-container); }
+  .chip-client { background: var(--secondary-container); color: var(--on-secondary-container); }
+  .step-card .when { font: 500 17px/1.4 var(--font-mono); color: var(--on-surface-variant); }
+  .step-card .what { margin: 0; font: 400 18px/1.55 var(--font-sans); color: var(--on-surface-variant); }
+  .warn-strip {
+    margin-top: 40px; display: flex; align-items: center; gap: 16px;
+    padding: 22px 28px; background: var(--warning-container);
+    border-radius: var(--radius-md); font: 500 22px/1.45 var(--font-sans);
+  }
+  .warn-strip .ms { font-size: 30px; color: var(--semantic-warning); flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -141,8 +156,10 @@
   "28종 전체 목록. 상세 업무 내용과 현행 PC 이동 방법(엑셀 타이핑, POP→MES 등)은 데이터 모델링 단계에서 활용.",
   "착수 전 삼진엘앤디 측 준비 사항 세 가지. 자료 수집일 6/15까지 모이면 일정 그대로 진행 가능. 보고서는 '어떤 내용이 포함된 어떤 보고서'까지만 정리해 주시면 디자인 형식은 크레플이 제시.",
   "7주 일정. 설계(파랑 연한색) → 개발(파랑) → 검증·납품(빨강). 서버 개발은 6/22부터 UI 설계·사용자 프로그램 개발과 병행 4주. 모든 날짜는 2026년 평일 기준.",
-  "크레플 투입 4인. 유예솔 대리 전담 투입이 일정의 전제 조건.",
-  "마무리 — 7/31(금) 동탄 본사 설치·운영 교육 완료 약속. 다음 단계는 6/15(월) 자료 수집."
+  "크레플 투입 4인 — 총괄·PM·주담당·부담당 역할 소개.",
+  "마무리 — 7/31(금) 동탄 본사 설치·운영 교육 완료 약속. 다음 단계는 6/15(월) 자료 수집.",
+  "다음 프로젝트 — 삼진엘앤디 비나(향) 맞춤형 MES. 기획 확정 ~7/10, 개발 8월 마감, 설치·시범운영 9월.",
+  "5단계 워크플로우. 1단계 요구 사항 작성 예시: 설비 상태 관리 — 현장 실무자가 일일 점검을 시행하고 휴대용 디바이스(갤럭시 탭)로 점검 내용을 기록하는 방식, 입력 정보는 xlsx 참고. 주의: 개발 범위 미확정 상태에서 마감 일정은 고정 — 기획안 확정(1~3단계)은 아무리 늦어도 7월 10일까지."
 ]</script>
 
 <deck-stage>
@@ -151,7 +168,7 @@
   <section data-label="Title" class="slide dark">
     <div class="stage" style="justify-content: center;">
       <img src="assets/crefle-wordmark-inverse.svg" alt="CREFLE" style="height: 64px; width: auto; margin-bottom: 64px; align-self: flex-start;">
-      <div class="eyebrow">SAMJIN L&amp;D · DX PROJECT</div>
+      <div class="eyebrow">삼진엘앤디 · DX PROJECT</div>
       <h1 class="title" style="color:#fff; max-width: 1600px;">삼진엘앤디 디지털 전환(DX)<br>프로젝트 진행 계획서</h1>
       <p class="lede" style="margin-top: 40px;">
         제조팀 종이 문서 28종의 디지털화·표준화 — 정보 입력부터 보고서 생성까지.
@@ -164,7 +181,7 @@
     </div>
     <div class="foot">
       <span>CREFLE Inc.</span>
-      <span class="pageno">01 / 09</span>
+      <span class="pageno">01 / 11</span>
     </div>
   </section>
 
@@ -198,7 +215,7 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">02 / 09</span>
+      <span class="pageno">02 / 11</span>
     </div>
   </section>
 
@@ -238,7 +255,7 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">03 / 09</span>
+      <span class="pageno">03 / 11</span>
     </div>
   </section>
 
@@ -287,7 +304,7 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">04 / 09</span>
+      <span class="pageno">04 / 11</span>
     </div>
   </section>
 
@@ -347,7 +364,7 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">05 / 09</span>
+      <span class="pageno">05 / 11</span>
     </div>
   </section>
 
@@ -384,7 +401,7 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">06 / 09</span>
+      <span class="pageno">06 / 11</span>
     </div>
   </section>
 
@@ -445,7 +462,7 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">07 / 09</span>
+      <span class="pageno">07 / 11</span>
     </div>
   </section>
 
@@ -466,10 +483,9 @@
           <div class="name">김정규 <span style="font-weight:400; font-size:30px; color:var(--on-surface-muted);">CTO</span></div>
           <div class="note">일정 · 요구사항 · 품질 관리</div>
         </div>
-        <div class="card-outline role-card" style="padding: 44px 48px; border-color: var(--primary);">
+        <div class="card-outline role-card" style="padding: 44px 48px;">
           <div class="role">S/W Engineer · 주담당</div>
           <div class="name">유예솔 <span style="font-weight:400; font-size:30px; color:var(--on-surface-muted);">대리</span></div>
-          <div class="badge-dedicated">프로젝트 전담 투입</div>
         </div>
         <div class="card-outline role-card" style="padding: 44px 48px;">
           <div class="role">S/W Engineer · 부담당</div>
@@ -478,13 +494,10 @@
         </div>
       </div>
 
-      <p style="margin: 48px 0 0; font: 400 23px/1.5 var(--font-sans); color: var(--on-surface-variant);">
-        본 추진 일정은 유예솔 대리의 프로젝트 전담 투입을 전제로 한다.
-      </p>
     </div>
     <div class="foot">
       <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
-      <span class="pageno">08 / 09</span>
+      <span class="pageno">08 / 11</span>
     </div>
   </section>
 
@@ -502,7 +515,82 @@
     </div>
     <div class="foot">
       <img src="assets/crefle-mark-white.svg" alt="" style="width:28px; height:28px; opacity:0.85;">
-      <span class="pageno">09 / 09</span>
+      <span class="pageno">09 / 11</span>
+    </div>
+  </section>
+
+  <!-- 10 · 비나 MES · 표지 ──────────────────────────────────────── -->
+  <section data-label="비나 MES 표지" class="slide dark">
+    <div class="stage" style="justify-content: center;">
+      <div class="eyebrow">NEXT PROJECT · 삼진엘앤디 비나(향)</div>
+      <h1 class="title" style="color:#fff; max-width: 1600px;">맞춤형 MES<br>개발 프로젝트</h1>
+      <p class="lede" style="margin-top: 40px;">
+        요구 사항 수집부터 설치·시범운영까지 — 5단계 워크플로우.
+      </p>
+      <div style="margin-top: 64px; display:flex; gap: 16px;">
+        <span class="capsule">기획안 확정 ~ 7/10</span>
+        <span class="capsule">개발 — 8월 마감</span>
+        <span class="capsule">설치·시범운영 — 9월</span>
+      </div>
+    </div>
+    <div class="foot">
+      <span>CREFLE Inc.</span>
+      <span class="pageno">10 / 11</span>
+    </div>
+  </section>
+
+  <!-- 11 · 비나 MES · 워크플로우 ────────────────────────────────── -->
+  <section data-label="비나 MES 워크플로우" class="slide">
+    <div class="stage">
+      <div class="eyebrow">삼진엘앤디 비나(향) · 맞춤형 MES</div>
+      <h2 class="section" style="font-size: 56px;">프로젝트 워크플로우 — 5단계</h2>
+
+      <div style="margin-top: 56px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; align-items: stretch;">
+        <div class="card-outline step-card">
+          <div class="num-eyebrow">STEP 01</div>
+          <h3 class="step-title">MES 요구 사항<br>자료 수집</h3>
+          <div><span class="chip chip-client">삼진엘앤디</span></div>
+          <div class="when">기한 — 최대한 빨리 (협의)</div>
+          <p class="what">기능 설명 · 사용 방법 · 자료 입력&amp;출력 유형 · 담당자 유형까지 최대한 상세히 작성</p>
+        </div>
+        <div class="card-outline step-card">
+          <div class="num-eyebrow">STEP 02</div>
+          <h3 class="step-title">요구 사항 분석 ·<br>1차 기획</h3>
+          <div><span class="chip chip-crefle">크레플</span></div>
+          <div class="when">기한 — 자료 수집 후 5일 이내</div>
+          <p class="what">H/W·S/W 결과물 구성 · 기능 명세서 · WBS 기반 진행 계획(중간 검증·산출물 단위)</p>
+        </div>
+        <div class="card-outline step-card">
+          <div class="num-eyebrow">STEP 03</div>
+          <h3 class="step-title">현장 방문 ·<br>기획안 확정</h3>
+          <div><span class="chip chip-client">삼진엘앤디</span><span class="chip chip-crefle">크레플</span></div>
+          <div class="when">기한 — 늦어도 7/10</div>
+          <p class="what">현장에서 실제 MES 운영 검토 후 기획안 최종안 상호 합의</p>
+        </div>
+        <div class="card-outline step-card">
+          <div class="num-eyebrow">STEP 04</div>
+          <h3 class="step-title">개발</h3>
+          <div><span class="chip chip-crefle">크레플</span></div>
+          <div class="when">기한 — 8월 마감</div>
+          <p class="what">확정된 기획안 기반 구현</p>
+        </div>
+        <div class="card-outline step-card">
+          <div class="num-eyebrow">STEP 05</div>
+          <h3 class="step-title">설치 ·<br>시범운영</h3>
+          <div><span class="chip chip-crefle">크레플</span><span class="chip chip-client">삼진엘앤디</span></div>
+          <div class="when">기한 — 9월</div>
+          <p class="what">현장 설치 후 시범운영</p>
+        </div>
+      </div>
+
+      <div class="warn-strip">
+        <span class="ms">warning</span>
+        <span>개발 범위가 확정되지 않은 상태에서 마감 일정은 정해져 있습니다 — 기획안 확정(1~3단계)은 아무리 늦어도 <strong>7월 10일</strong>까지 마무리되어야 합니다.</span>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="assets/crefle-mark.svg" alt="" style="width:24px; height:24px; opacity:0.6;">
+      <span class="pageno">11 / 11</span>
     </div>
   </section>
 
