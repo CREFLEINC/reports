@@ -4,9 +4,10 @@ CREFLE Reports — 자체 HTML 문서 열람 서버 (FastAPI)
 proposals/ 하위에 보관된 HTML 보고서를, 자동 생성되는 목차(TOC)와 함께 제공한다.
 
 라우트
+    GET /healthz     무인증 헬스체크 (도커 HEALTHCHECK 용)
     GET /            보관 문서 목차 페이지 (요청마다 폴더를 스캔해 동적 생성)
     GET /<경로>      문서·에셋 파일 제공 (proposals/ 범위로만 제한)
-모든 경로는 HTTP Basic Auth 로 보호된다.
+/healthz 를 제외한 모든 경로는 HTTP Basic Auth 로 보호된다.
 
 실행
     pip install -r requirements.txt
@@ -279,16 +280,24 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="CREFLE Reports", dependencies=[Depends(verify)], lifespan=lifespan)
+app = FastAPI(title="CREFLE Reports", lifespan=lifespan)
 
 
+@app.get("/healthz")
+def healthz() -> dict:
+    """무인증 헬스체크(도커 HEALTHCHECK 용). DOCS_DIR 접근·인증 없음."""
+    return {"status": "ok"}
+
+
+# 인증은 문서 라우트에만 개별 적용한다. (FastAPI 는 라우트의 dependencies=[] 로
+# 앱 전역 의존성을 끌 수 없으므로, 전역 대신 라우트별로 verify 를 건다 → /healthz 만 공개)
 @app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
+def index(_: str = Depends(verify)) -> HTMLResponse:
     return HTMLResponse(render_index(discover_documents()))
 
 
 @app.get("/{full_path:path}")
-def serve_file(full_path: str) -> FileResponse:
+def serve_file(full_path: str, _: str = Depends(verify)) -> FileResponse:
     candidate = (BASE_DIR / full_path).resolve()
     if not _is_within(candidate, DOCS_DIR) or not candidate.is_file():
         raise HTTPException(status_code=404, detail="찾을 수 없습니다.")

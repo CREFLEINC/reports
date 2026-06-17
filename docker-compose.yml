@@ -1,0 +1,25 @@
+services:
+  reporter:
+    image: hub.crefle.com/service/reporter:1.0
+    container_name: reporter
+    restart: unless-stopped
+    ports:
+      - "28080:28080"
+    environment:
+      REPORTS_USER: "${REPORTS_USER:-crefle}"
+      REPORTS_PASS: "${REPORTS_PASS:-crefle}"
+      # REPORTS_DOCS_DIR 은 기본값 "proposals" 유지 → DOCS_DIR=/app/proposals (BASE_DIR=/app 하위).
+      # 절대경로로 바꾸면 server.py 의 relative_to(BASE_DIR) 가 깨지므로 변경 금지.
+      HOST: "0.0.0.0"
+      PORT: "28080"
+    volumes:
+      # 동적 주입: 호스트 리포트 디렉터리 → /app/proposals (읽기전용).
+      # 파일 추가/삭제는 즉시 반영(discover_documents 가 매 요청 스캔) → 재시작 불필요.
+      - ./proposals:/app/proposals:ro
+    healthcheck:
+      # /healthz 는 무인증 → curl 없이 python urllib 로 점검.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:28080/healthz', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
