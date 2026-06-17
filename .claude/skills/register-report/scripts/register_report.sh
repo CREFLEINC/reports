@@ -18,6 +18,7 @@
 # 선택:
 #   --assets <dir>     리포트가 참조하는 상대 자산 디렉터리(내용을 대상 폴더로 병합)
 #   --no-sync          hulk 동기화 생략(배치만)
+#   --no-pdf           PDF 사전생성 생략(기본: 생성)
 #   --commit           배치 후 git add+commit (기본: 미커밋)
 #   --push             커밋 후 git push (--commit 동반)
 #   --force            대상 파일이 이미 있어도 덮어쓰기
@@ -36,7 +37,7 @@ BASE_URL="http://192.168.1.111:28080"
 U="${REPORTS_USER:-crefle}"; P="${REPORTS_PASS:-crefle}"
 
 SRC=""; TYPE=""; NAME=""; VER=""; ASSETS=""
-DO_SYNC=1; DO_COMMIT=0; DO_PUSH=0; FORCE=0
+DO_SYNC=1; DO_COMMIT=0; DO_PUSH=0; FORCE=0; DO_PDF=1
 
 die(){ echo "❌ $*" >&2; exit 1; }
 note(){ echo "• $*"; }
@@ -52,6 +53,7 @@ while [ $# -gt 0 ]; do
     --hulk) HULK_DEST="${2:-}"; shift 2;;
     --base-url) BASE_URL="${2:-}"; shift 2;;
     --no-sync) DO_SYNC=0; shift;;
+    --no-pdf) DO_PDF=0; shift;;
     --commit) DO_COMMIT=1; shift;;
     --push) DO_PUSH=1; DO_COMMIT=1; shift;;
     --force) FORCE=1; shift;;
@@ -132,10 +134,27 @@ if printf '%s\n' "$CHECK" | grep -q '^ABS'; then
   printf '%s\n' "$CHECK" | awk -F'\t' '$1=="ABS"{print "     - "$2}'
 fi
 
+# ---- PDF 사전생성(기본 수행) ----------------------------------------------
+# 데모(파일명에 '데모')는 render_pdf.py 가 자동으로 재생/스크롤을 트리거해 펼친 뒤 캡처한다.
+PDF_MADE=0
+PDF_REL="${REL_PATH%.html}.pdf"
+if [ "$DO_PDF" -eq 1 ]; then
+  PYBIN="$REPO/.venv/bin/python"
+  if [ -x "$PYBIN" ] && [ -f "$REPO/tools/render_pdf.py" ]; then
+    if "$PYBIN" "$REPO/tools/render_pdf.py" "$DEST" >/dev/null 2>&1; then
+      PDF_MADE=1; note "PDF 사전생성: $PDF_REL"
+    else
+      echo "⚠️  PDF 생성 실패(playwright/chromium 설치 확인). HTML 등록은 계속."
+    fi
+  else
+    echo "⚠️  PDF 도구 없음(.venv + tools/render_pdf.py). HTML 만 등록(추후 render_pdf.py --all)."
+  fi
+fi
+
 # ---- git 커밋(선택) -------------------------------------------------------
 if [ "$DO_COMMIT" -eq 1 ]; then
   ( cd "$REPO"
-    git add "$REL_PATH" $([ -n "$ASSETS" ] && echo "$REL_DIR")
+    git add "$REL_PATH" $([ "$PDF_MADE" -eq 1 ] && echo "$PDF_REL") $([ -n "$ASSETS" ] && echo "$REL_DIR")
     git commit -q -m "Add report: $NAME v$VER ($TYPE)" \
       -m "등록 경로: $REL_PATH" \
       -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" \

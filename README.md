@@ -93,12 +93,33 @@ rsync -az --delete proposals/ hulk@192.168.1.111:/home/hulk/working/reporter.cre
 ```
 > 새 폴더의 목차 섹션명을 예쁘게 하려면 `server.py`의 `GROUP_LABELS`만 수정(이건 코드 변경 → 재빌드, 선택).
 
+## PDF 다운로드 (사전생성)
+
+각 문서의 PDF를 **미리 생성**해 `proposals/<문서>.pdf` 로 함께 보관하고, 목차 카드의 **⬇ PDF**
+버튼으로 내려받는다(정적 제공). 운영 컨테이너는 그대로 가볍게 유지된다(렌더링은 빌드/등록 머신에서만).
+
+- **엔진**: Playwright + Chromium (JS 구동 덱·최신 CSS 충실 렌더). 덱(`deck-stage.js`)은 내장 `@media print`로 슬라이드당 1페이지(1920×1080), 일반 문서는 A4 자동 페이지네이션.
+- **인터랙티브 데모**: 캡처 전 재생/스크롤을 자동 트리거해 콘텐츠(차트·분석표 등)를 펼친 뒤 PDF화.
+- **최신성**: PDF가 원본 HTML보다 오래되면 목차 버튼이 흐리게 표시되고, 재생성 시 자동 갱신.
+
+도구 설치(빌드/등록 머신, 최초 1회):
+```bash
+pip install -r tools/requirements-pdf.txt
+python -m playwright install chromium
+```
+생성/갱신:
+```bash
+python tools/render_pdf.py --all            # 누락·오래된 것만 생성
+python tools/render_pdf.py --all --force    # 전부 재생성
+python tools/render_pdf.py <html>           # 단일 문서
+```
+> 신규 리포트 등록 시 `register-report` 하네스가 PDF를 **자동 생성**한다(`--no-pdf`로 생략 가능).
+> 생성된 PDF는 `proposals/`에 들어가므로 hulk 동기화(rsync) 시 함께 배포된다.
+
 ## 향후 추가 예정 기능 (로드맵)
 
 ### 1. 문서별 다운로드 기능
-- **PDF 다운로드 (필수)** — 각 문서를 PDF로 내려받는 기능. 목차 카드/문서 화면에 다운로드 버튼 추가.
-  - 후보 방식: (a) 헤드리스 Chromium(Playwright)으로 HTML→PDF 렌더링 후 제공, (b) 사전 생성한 PDF를 함께 보관하고 정적 제공.
-  - 1920×1080 덱은 페이지 분할·배율 처리가 필요하므로 렌더링 옵션(용지·여백·배경) 검토 필요.
+- **PDF 다운로드 (필수)** — ✅ **구현됨**. 자세한 내용은 위 "PDF 다운로드(사전생성)" 섹션 참조.
 - **PPT 다운로드 (선택)** — 동일 문서를 PPTX로 내보내기.
   - HTML→PPTX는 정형 변환이 어려움. 슬라이드 덱은 슬라이드별 이미지 캡처 후 PPTX 임베드, 또는 원본 PPTX를 함께 보관하는 방식 검토.
 

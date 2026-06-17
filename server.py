@@ -65,6 +65,7 @@ MEDIA_TYPES = {
     ".js": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".md": "text/markdown; charset=utf-8",
+    ".pdf": "application/pdf",
     ".svg": "image/svg+xml",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -145,6 +146,14 @@ def discover_documents() -> list:
         rel = path.relative_to(BASE_DIR).as_posix()
         group = path.parent.relative_to(BASE_DIR).as_posix()
         stat = path.stat()
+        # 같은 위치의 사전생성 PDF(<문서>.pdf) 사이드카 — 있으면 다운로드 링크 노출.
+        pdf_path = path.with_suffix(".pdf")
+        pdf = None
+        if pdf_path.is_file():
+            pdf = {
+                "href": "/" + quote(pdf_path.relative_to(BASE_DIR).as_posix()),
+                "stale": pdf_path.stat().st_mtime < stat.st_mtime,  # 원본보다 오래됨
+            }
         docs.append(
             {
                 "title": extract_title(path),
@@ -153,6 +162,7 @@ def discover_documents() -> list:
                 "group": group,
                 "mtime": stat.st_mtime,
                 "size_kb": max(1, round(stat.st_size / 1024)),
+                "pdf": pdf,
             }
         )
     return docs
@@ -189,14 +199,20 @@ INDEX_CSS = """
   .group-title{font-size:.78rem; font-weight:700; text-transform:uppercase;
                letter-spacing:.12em; color:var(--red); margin:0 0 14px;}
   .cards{list-style:none; margin:0; padding:0; display:grid; gap:12px;}
-  .card a{display:flex; flex-direction:column; gap:6px; text-decoration:none;
-          color:inherit; background:var(--card); border:1px solid var(--line);
-          border-radius:12px; padding:18px 20px; box-shadow:var(--shadow);
-          transition:transform .15s ease, border-color .15s ease;}
-  .card a:hover{transform:translateY(-2px); border-color:var(--red);}
+  .card{display:flex; align-items:stretch; background:var(--card);
+        border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow);
+        overflow:hidden; transition:transform .15s ease, border-color .15s ease;}
+  .card:hover{transform:translateY(-2px); border-color:var(--red);}
+  .card-main{flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;
+             text-decoration:none; color:inherit; padding:18px 20px;}
   .card-title{font-size:1.05rem; font-weight:600; color:var(--ink);}
   .card-meta{font-size:.8rem; color:var(--muted); font-variant-numeric:tabular-nums;
              word-break:break-all;}
+  .card-pdf{display:flex; align-items:center; gap:6px; padding:0 18px; white-space:nowrap;
+            text-decoration:none; color:var(--red); font-size:.82rem; font-weight:600;
+            border-left:1px solid var(--line);}
+  .card-pdf:hover{background:rgba(201,37,44,.08);}
+  .card-pdf.stale{color:var(--muted);}
   .empty{color:var(--muted);}
   footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line);
          color:var(--muted); font-size:.8rem;}
@@ -221,12 +237,22 @@ def render_index(docs: list) -> str:
             href = d["href"]
             date = datetime.fromtimestamp(d["mtime"]).strftime("%Y-%m-%d")
             size_kb = d["size_kb"]
+            pdf = d.get("pdf")
+            pdf_link = ""
+            if pdf:
+                pdf_cls = "card-pdf stale" if pdf["stale"] else "card-pdf"
+                pdf_title = "원본 수정 이후 PDF 재생성 필요" if pdf["stale"] else "PDF 다운로드"
+                pdf_href = pdf["href"]
+                pdf_link = (
+                    f'\n            <a class="{pdf_cls}" href="{pdf_href}" download '
+                    f'title="{pdf_title}">⬇ PDF</a>'
+                )
             cards.append(
                 f"""          <li class="card">
-            <a href="{href}">
+            <a class="card-main" href="{href}">
               <span class="card-title">{title}</span>
               <span class="card-meta">{rel} · {date} · {size_kb} KB</span>
-            </a>
+            </a>{pdf_link}
           </li>"""
             )
         cards_html = "\n".join(cards)

@@ -1,6 +1,6 @@
 services:
   reporter:
-    image: hub.crefle.com/service/reporter:1.0
+    image: hub.crefle.com/service/reporter:1.1
     container_name: reporter
     restart: unless-stopped
     ports:

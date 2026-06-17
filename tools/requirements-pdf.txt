@@ -1,0 +1,6 @@
+# PDF 사전생성 도구(tools/render_pdf.py) 전용 의존성.
+# 주의: 운영 컨테이너(server)에는 들어가지 않는다 — 빌드/등록 머신에서만 사용.
+# 설치:
+#   pip install -r tools/requirements-pdf.txt
+#   python -m playwright install chromium
+playwright>=1.40
