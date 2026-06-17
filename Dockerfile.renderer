@@ -9,9 +9,15 @@ ENV LANG=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 \
     REPORTS_UPLOADS_DIR=/work/uploads \
     RENDER_TIMEOUT_SEC=120 \
-    HOME=/tmp
+    HOME=/tmp \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
+
+# 이 베이스(-noble)는 브라우저(/ms-playwright)만 제공하고 playwright 파이썬 패키지는 없으므로
+# 브라우저 버전(v1.60.0)에 맞춰 pip 설치한다(루트 단계에서 시스템 전역 설치 → pwuser 도 import 가능).
+RUN pip install --no-cache-dir --break-system-packages playwright==1.60.0
+
 # render_pdf.py 를 worker.py 와 같은 디렉터리에 두어 `from render_pdf import render_one` 가능.
 COPY tools/render_pdf.py ./render_pdf.py
 COPY renderer/worker.py ./worker.py
