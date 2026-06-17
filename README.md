@@ -59,3 +59,36 @@ python3 server.py
 - macOS 상시 운영: `launchd` (`~/Library/LaunchAgents/*.plist`)
 - Linux 서버 운영: `systemd` 서비스 유닛
 - 인터넷 공개가 필요하면 앞단에 `nginx`/`Caddy` 리버스 프록시로 HTTPS·도메인 연결(이번 범위 밖).
+
+## 운영 배포 (hulk · Docker)
+
+상시 운영은 **hulk 서버에서 Docker Compose**로 한다.
+
+- 서버: `ssh hulk@192.168.1.111` (docker 그룹, sudo 불필요)
+- 배포 위치: `/home/hulk/working/reporter.crefle.com/`
+- 이미지: `hub.crefle.com/service/reporter:1.0` (linux/amd64)
+- 접속: `http://192.168.1.111:28080` (로그인 `crefle`/`crefle`, `.env`로 변경)
+- 리포트는 이미지에 굽지 않고 `./proposals → /app/proposals:ro` **bind mount**로 주입한다.
+  `discover_documents()`가 매 요청 스캔이므로 **파일을 추가하면 재시작 없이 즉시 반영**된다.
+
+### 이미지 빌드 + push (로컬, arm64 → amd64 크로스빌드)
+```bash
+docker buildx create --name crefle-builder --driver docker-container --bootstrap --use 2>/dev/null || docker buildx use crefle-builder
+docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.0 --push .
+```
+> 코드(`server.py`/`Dockerfile`/의존성) 변경 시에만 태그를 올리고(`:1.1`…) compose의 `image:`를 갱신한다. 리포트 변경은 마운트라 재빌드 불필요.
+
+### 배포 / 기동 (hulk)
+```bash
+D=/home/hulk/working/reporter.crefle.com
+scp docker-compose.yml .env.example hulk@192.168.1.111:$D/
+ssh hulk@192.168.1.111 "cd $D && cp -n .env.example .env"   # 최초 1회
+ssh hulk@192.168.1.111 "cd $D && docker compose pull && docker compose up -d"
+```
+
+### 리포트 추가/갱신 (재빌드·재시작 불필요)
+git repo의 `proposals/`가 소스. 편집 후 hulk로 동기화만 하면 된다.
+```bash
+rsync -az --delete proposals/ hulk@192.168.1.111:/home/hulk/working/reporter.crefle.com/proposals/
+```
+> 새 폴더의 목차 섹션명을 예쁘게 하려면 `server.py`의 `GROUP_LABELS`만 수정(이건 코드 변경 → 재빌드, 선택).
