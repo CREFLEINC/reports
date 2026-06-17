@@ -1,6 +1,6 @@
 services:
-  reporter:
-    image: hub.crefle.com/service/reporter:1.1
+  reporter:                                   # 뷰어 + 업로드 API (lean, Chromium 없음)
+    image: hub.crefle.com/service/reporter:1.2
     container_name: reporter
     restart: unless-stopped
     ports:
@@ -8,18 +8,42 @@ services:
     environment:
       REPORTS_USER: "${REPORTS_USER:-crefle}"
       REPORTS_PASS: "${REPORTS_PASS:-crefle}"
-      # REPORTS_DOCS_DIR 은 기본값 "proposals" 유지 → DOCS_DIR=/app/proposals (BASE_DIR=/app 하위).
-      # 절대경로로 바꾸면 server.py 의 relative_to(BASE_DIR) 가 깨지므로 변경 금지.
+      # 업로드(쓰기) 전용 자격증명 — 미설정 시 compose 기동 거부(fail-closed).
+      REPORTS_UPLOAD_USER: "${REPORTS_UPLOAD_USER:-crefle}"
+      REPORTS_UPLOAD_PASS: "${REPORTS_UPLOAD_PASS:?set a strong upload password}"
+      REPORTS_UPLOADS_DIR: "uploads"           # BASE_DIR(/app) 기준 → /app/uploads
+      REPORTS_MAX_UPLOAD_MB: "50"
       HOST: "0.0.0.0"
       PORT: "28080"
     volumes:
-      # 동적 주입: 호스트 리포트 디렉터리 → /app/proposals (읽기전용).
-      # 파일 추가/삭제는 즉시 반영(discover_documents 가 매 요청 스캔) → 재시작 불필요.
-      - ./proposals:/app/proposals:ro
+      - ./proposals:/app/proposals:ro          # git 큐레이션 문서 (rsync --delete 대상)
+      - ./uploads:/app/uploads:rw              # 업로드 소스 오브 트루스 (별도 트리)
     healthcheck:
-      # /healthz 는 무인증 → curl 없이 python urllib 로 점검.
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:28080/healthz', timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  renderer:                                    # PDF 워커 (Chromium 전용·격리)
+    image: hub.crefle.com/service/reporter-renderer:1.0
+    container_name: reporter-renderer
+    restart: unless-stopped
+    init: true                                 # 좀비 chromium 프로세스 reaping
+    environment:
+      REPORTS_UPLOADS_DIR: "/work/uploads"
+      RENDER_TIMEOUT_SEC: "120"
+    volumes:
+      - ./uploads:/work/uploads:rw             # 업로드 트리만 (proposals·소스 미마운트)
+    network_mode: "none"                        # 네트워크 불필요(file:// 렌더) → SSRF/탈출 격리
+    read_only: true                             # rootfs 읽기전용 (쓰기는 /work/uploads + tmpfs)
+    tmpfs:
+      - /tmp
+      - /dev/shm:size=512m                       # Chromium 공유 메모리
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 1.5

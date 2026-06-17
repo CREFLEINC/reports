@@ -66,7 +66,7 @@ python3 server.py
 
 - 서버: `ssh hulk@192.168.1.111` (docker 그룹, sudo 불필요)
 - 배포 위치: `/home/hulk/working/reporter.crefle.com/`
-- 이미지: `hub.crefle.com/service/reporter:1.0` (linux/amd64)
+- 이미지: 뷰어 `hub.crefle.com/service/reporter:1.2` + 렌더러 `hub.crefle.com/service/reporter-renderer:1.0` (둘 다 linux/amd64)
 - 접속: `http://192.168.1.111:28080` (로그인 `crefle`/`crefle`, `.env`로 변경)
 - 리포트는 이미지에 굽지 않고 `./proposals → /app/proposals:ro` **bind mount**로 주입한다.
   `discover_documents()`가 매 요청 스캔이므로 **파일을 추가하면 재시작 없이 즉시 반영**된다.
@@ -74,17 +74,22 @@ python3 server.py
 ### 이미지 빌드 + push (로컬, arm64 → amd64 크로스빌드)
 ```bash
 docker buildx create --name crefle-builder --driver docker-container --bootstrap --use 2>/dev/null || docker buildx use crefle-builder
-docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.0 --push .
+# 뷰어(lean, Chromium 없음)
+docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.2 --push .
+# 렌더러(Chromium 워커)
+docker buildx build --platform linux/amd64 -f Dockerfile.renderer -t hub.crefle.com/service/reporter-renderer:1.0 --push .
 ```
-> 코드(`server.py`/`Dockerfile`/의존성) 변경 시에만 태그를 올리고(`:1.1`…) compose의 `image:`를 갱신한다. 리포트 변경은 마운트라 재빌드 불필요.
+> 코드 변경 시에만 태그를 올리고 compose의 `image:`를 갱신한다. 리포트/업로드 콘텐츠 변경은 마운트라 재빌드 불필요.
 
 ### 배포 / 기동 (hulk)
 ```bash
 D=/home/hulk/working/reporter.crefle.com
+ssh hulk@192.168.1.111 "mkdir -p $D/uploads/docs $D/uploads/queue/done $D/uploads/tmp"  # 업로드 볼륨(최초 1회)
 scp docker-compose.yml .env.example hulk@192.168.1.111:$D/
-ssh hulk@192.168.1.111 "cd $D && cp -n .env.example .env"   # 최초 1회
+ssh hulk@192.168.1.111 "cd $D && cp -n .env.example .env"   # 최초 1회 — .env 의 REPORTS_UPLOAD_PASS 를 강한 값으로 설정
 ssh hulk@192.168.1.111 "cd $D && docker compose pull && docker compose up -d"
 ```
+> `REPORTS_UPLOAD_PASS` 미설정이면 compose 가 기동하지 않는다(fail-closed). `uploads/` 는 git·rsync 미러가 아니므로 **별도 백업** 필요.
 
 ### 리포트 추가/갱신 (재빌드·재시작 불필요)
 git repo의 `proposals/`가 소스. 편집 후 hulk로 동기화만 하면 된다.
@@ -116,6 +121,19 @@ python tools/render_pdf.py <html>           # 단일 문서
 > 신규 리포트 등록 시 `register-report` 하네스가 PDF를 **자동 생성**한다(`--no-pdf`로 생략 가능).
 > 생성된 PDF는 `proposals/`에 들어가므로 hulk 동기화(rsync) 시 함께 배포된다.
 
+## 웹 업로드 (self-service · M1)
+
+`/upload` 에서 HTML 보고서(.html) 또는 자산 포함 묶음(.zip)을 올리면 **즉시 게시**되고 PDF가 자동 생성된다.
+
+- 접근: 목차 우측 **+ 업로드** → `/upload`. 읽기와 **별도의 쓰기 자격증명**(`REPORTS_UPLOAD_USER/PASS`)이 필요.
+- 입력: 문서 유형 · 이름 · 버전 · 파일. 경로는 서버가 생성(`uploads/docs/<type>/<이름>_v<버전>/index.html`).
+- 자산 있는 문서는 `index.html` 포함 **.zip** 으로(zip-slip·zip-bomb·심볼릭링크·확장자 검증).
+- 게시 즉시 목차 노출("PDF 생성 중…") → 렌더러 워커가 PDF 생성 후 **⬇ PDF** 버튼 활성.
+- 소스 오브 트루스 = **`uploads/` 볼륨**(git 아님). 기존 git 문서와 별도 트리 → `rsync --delete proposals/` 영향 없음.
+- 아키텍처: 뷰어(lean)가 업로드 수신·게시, **격리 렌더러 워커**(Chromium·`network_mode:none`)가 `uploads/queue/` 를 소비해 PDF 생성.
+
+**보안/범위(M1)**: 업로드 HTML 은 활성 콘텐츠다. nosniff·CSP(`connect-src 'none'` 등)·격리 렌더러·감사 로그(`uploads/audit.log`)를 적용하되, **공유 자격증명·동일 출처**라는 구조적 위험이 남는다 → **LAN 전용** 전제. 실사용자 인증(Google OAuth)은 M2, 공개 노출 시 별도 출처·TLS 는 M3 (그 전에는 공개 프록시 금지).
+
 ## 향후 추가 예정 기능 (로드맵)
 
 ### 1. 문서별 다운로드 기능
@@ -123,7 +141,7 @@ python tools/render_pdf.py <html>           # 단일 문서
 - **PPT 다운로드 (선택)** — 동일 문서를 PPTX로 내보내기.
   - HTML→PPTX는 정형 변환이 어려움. 슬라이드 덱은 슬라이드별 이미지 캡처 후 PPTX 임베드, 또는 원본 PPTX를 함께 보관하는 방식 검토.
 
-### 2. HTML 문서 업로드 기능
+### 2. HTML 문서 업로드 기능 — ✅ M1 구현됨 (위 "웹 업로드" 섹션 참조)
 - 현재 등록은 내부망 rsync/`register-report` 하네스로 수행. 이를 **웹 UI 업로드**로 확장.
   - 기능: 로그인 후 화면에서 `.html`(및 자산) 업로드 → 유형·이름·버전 입력 → `proposals/` 반영.
   - 고려사항: 인증/권한 강화(현재 Basic Auth는 평문·공용), 업로드 검증(파일형식·크기·자산 동반), bind mount가 `:ro`이므로 쓰기 경로 분리 필요, 동시성/중복 처리.

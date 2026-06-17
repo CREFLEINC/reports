@@ -1,24 +1,25 @@
 """
-CREFLE Reports — 자체 HTML 문서 열람 서버 (FastAPI)
+CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
 
-proposals/ 하위에 보관된 HTML 보고서를, 자동 생성되는 목차(TOC)와 함께 제공한다.
+두 개의 문서 루트를 목차(TOC)와 함께 제공한다:
+  - proposals/        git 큐레이션 문서(읽기전용 마운트)
+  - uploads/docs/     웹 업로드 문서(서버 볼륨 전용 소스 오브 트루스)
 
 라우트
-    GET /healthz     무인증 헬스체크 (도커 HEALTHCHECK 용)
-    GET /            보관 문서 목차 페이지 (요청마다 폴더를 스캔해 동적 생성)
-    GET /<경로>      문서·에셋 파일 제공 (proposals/ 범위로만 제한)
-/healthz 를 제외한 모든 경로는 HTTP Basic Auth 로 보호된다.
+    GET  /healthz     무인증 헬스체크 (도커 HEALTHCHECK 용)
+    GET  /            보관 문서 목차 페이지 (요청마다 두 루트를 스캔해 동적 생성)
+    GET  /upload      업로드 폼 (쓰기 자격증명 필요)
+    POST /upload      업로드 처리: 검증 → 원자적 게시 → 렌더 작업 enqueue
+    GET  /<경로>      문서·에셋 파일 제공 (proposals/ + uploads/docs/ 범위로만 제한)
+/healthz 외 읽기는 Basic Auth(verify), 쓰기(/upload)는 별도 자격증명(require_uploader).
 
-실행
-    pip install -r requirements.txt
-    python3 server.py                 # 0.0.0.0:8000
-
-환경변수 (모두 선택, 괄호는 기본값)
-    REPORTS_USER       Basic Auth 사용자명          (crefle)
-    REPORTS_PASS       Basic Auth 비밀번호          (crefle — 운영 시 반드시 변경)
-    HOST               바인딩 주소                  (0.0.0.0)
-    PORT               포트                         (8000)
-    REPORTS_DOCS_DIR   문서 루트(서버 위치 기준 상대) (proposals)
+환경변수 (괄호는 기본값)
+    REPORTS_USER / REPORTS_PASS            읽기 Basic Auth (crefle/crefle)
+    REPORTS_UPLOAD_USER / REPORTS_UPLOAD_PASS  쓰기 자격증명 (crefle / "" → 미설정 시 업로드 503)
+    HOST / PORT                            바인딩 (0.0.0.0 / 8000)
+    REPORTS_DOCS_DIR                       git 문서 루트 (proposals)
+    REPORTS_UPLOADS_DIR                    업로드 루트 (uploads)
+    REPORTS_MAX_UPLOAD_MB                  업로드 최대 크기 MB (50)
 """
 from __future__ import annotations
 
@@ -33,9 +34,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+import uploads_handler
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -44,10 +47,18 @@ logger = logging.getLogger("uvicorn.error")
 # ──────────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 DOCS_DIR = (BASE_DIR / os.environ.get("REPORTS_DOCS_DIR", "proposals")).resolve()
+UPLOADS_DIR = (BASE_DIR / os.environ.get("REPORTS_UPLOADS_DIR", "uploads")).resolve()
+UPLOADS_DOCS = UPLOADS_DIR / "docs"
+# serve 허용 루트(허용목록). BASE_DIR 로 넓히지 않는다(server.py/.env/.git 재노출 방지).
+DOCS_ROOTS = [DOCS_DIR, UPLOADS_DOCS]
 
 USERNAME = os.environ.get("REPORTS_USER", "crefle")
 PASSWORD = os.environ.get("REPORTS_PASS", "crefle")
 _USING_DEFAULT_PASS = "REPORTS_PASS" not in os.environ
+
+# 쓰기(업로드) 전용 자격증명 — 읽기와 분리. 미설정 시 /upload 는 503(fail-closed).
+UPLOAD_USER = os.environ.get("REPORTS_UPLOAD_USER", "crefle")
+UPLOAD_PASS = os.environ.get("REPORTS_UPLOAD_PASS", "")
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -83,22 +94,35 @@ TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# 인증 (모든 라우트에 전역 적용)
+# 인증
 # ──────────────────────────────────────────────────────────────────────────
 security = HTTPBasic()
 
 
 def verify(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    ok_user = secrets.compare_digest(
-        credentials.username.encode("utf-8"), USERNAME.encode("utf-8")
-    )
-    ok_pass = secrets.compare_digest(
-        credentials.password.encode("utf-8"), PASSWORD.encode("utf-8")
-    )
+    """읽기 인증."""
+    ok_user = secrets.compare_digest(credentials.username.encode("utf-8"), USERNAME.encode("utf-8"))
+    ok_pass = secrets.compare_digest(credentials.password.encode("utf-8"), PASSWORD.encode("utf-8"))
     if not (ok_user and ok_pass):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="인증이 필요합니다.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+
+def require_uploader(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    """쓰기(업로드) 인증. ← 향후 Google Workspace OAuth 로 교체할 단일 seam.
+    REPORTS_UPLOAD_PASS 미설정이면 업로드를 막는다(fail-closed)."""
+    if not UPLOAD_PASS:
+        raise HTTPException(status_code=503, detail="업로드 비활성화됨(REPORTS_UPLOAD_PASS 미설정).")
+    ok_user = secrets.compare_digest(credentials.username.encode("utf-8"), UPLOAD_USER.encode("utf-8"))
+    ok_pass = secrets.compare_digest(credentials.password.encode("utf-8"), UPLOAD_PASS.encode("utf-8"))
+    if not (ok_user and ok_pass):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="업로드 인증이 필요합니다.",
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
@@ -120,7 +144,7 @@ def extract_title(path: Path) -> str:
     """HTML 의 <title> 을 추출. 없으면 파일명(확장자 제외)으로 폴백."""
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
-            head = fh.read(8192)  # title 은 항상 <head> 안 → 앞부분만 읽음
+            head = fh.read(8192)
     except OSError:
         return path.stem
     m = TITLE_RE.search(head)
@@ -131,41 +155,68 @@ def extract_title(path: Path) -> str:
     return path.stem
 
 
-def discover_documents() -> list:
-    """DOCS_DIR 하위의 *.html 보고서를 수집한다(숨김 경로·index.html 제외)."""
+def _scan_root(root: Path, *, skip_index_html: bool, group_for) -> list:
+    """한 루트 하위 *.html 을 수집. group_for(path)->그룹키. uploads 루트는
+    index.html 이 곧 문서이므로 skip_index_html=False."""
     docs = []
-    if not DOCS_DIR.is_dir():
-        logger.warning("문서 디렉터리를 찾을 수 없습니다: %s", DOCS_DIR)
+    if not root.is_dir():
         return docs
-    for path in DOCS_DIR.rglob("*.html"):
-        rel_from_docs = path.relative_to(DOCS_DIR)
-        if any(part.startswith(".") for part in rel_from_docs.parts):
-            continue  # 숨김 폴더/파일
-        if path.name.lower() == "index.html":
-            continue  # 폴더 랜딩 페이지는 목록에서 제외
+    for path in root.rglob("*.html"):
+        rel_from_root = path.relative_to(root)
+        if any(part.startswith(".") for part in rel_from_root.parts):
+            continue
+        if skip_index_html and path.name.lower() == "index.html":
+            continue
         rel = path.relative_to(BASE_DIR).as_posix()
-        group = path.parent.relative_to(BASE_DIR).as_posix()
         stat = path.stat()
-        # 같은 위치의 사전생성 PDF(<문서>.pdf) 사이드카 — 있으면 다운로드 링크 노출.
-        pdf_path = path.with_suffix(".pdf")
+        pdf_path = path.with_suffix(".pdf")  # index.html → index.pdf
         pdf = None
         if pdf_path.is_file():
             pdf = {
                 "href": "/" + quote(pdf_path.relative_to(BASE_DIR).as_posix()),
-                "stale": pdf_path.stat().st_mtime < stat.st_mtime,  # 원본보다 오래됨
+                "stale": pdf_path.stat().st_mtime < stat.st_mtime,
             }
         docs.append(
             {
                 "title": extract_title(path),
                 "href": "/" + quote(rel),
                 "rel": rel,
-                "group": group,
+                "group": group_for(path),
                 "mtime": stat.st_mtime,
                 "size_kb": max(1, round(stat.st_size / 1024)),
                 "pdf": pdf,
+                "pending_pdf": pdf is None and not skip_index_html,  # 업로드 문서의 PDF 생성 대기
             }
         )
     return docs
+
+
+def _uploads_group(path: Path) -> str:
+    parts = path.relative_to(UPLOADS_DOCS).parts
+    return "uploads/" + parts[0] if len(parts) > 1 else "uploads"
+
+
+def discover_documents() -> list:
+    """proposals/ + uploads/docs/ 두 루트를 스캔(요청마다 → 즉시 게시 반영)."""
+    docs = _scan_root(
+        DOCS_DIR,
+        skip_index_html=True,
+        group_for=lambda p: p.parent.relative_to(BASE_DIR).as_posix(),
+    )
+    docs += _scan_root(UPLOADS_DOCS, skip_index_html=False, group_for=_uploads_group)
+    if not DOCS_DIR.is_dir() and not UPLOADS_DOCS.is_dir():
+        logger.warning("문서 디렉터리가 없습니다: %s / %s", DOCS_DIR, UPLOADS_DOCS)
+    return docs
+
+
+def _group_label(g: str) -> str:
+    if g in GROUP_LABELS:
+        return GROUP_LABELS[g]
+    if g == "uploads":
+        return "업로드 (웹 등록)"
+    if g.startswith("uploads/"):
+        return "업로드 · " + g.split("/", 1)[1]
+    return g
 
 
 INDEX_CSS = """
@@ -194,6 +245,9 @@ INDEX_CSS = """
   .brand{font-size:1.6rem; font-weight:700; letter-spacing:-.02em; color:var(--ink);}
   .brand .dot{color:var(--red);}
   .count{margin-left:auto; color:var(--muted); font-size:.875rem;}
+  .upload-link{text-decoration:none; font-size:.82rem; font-weight:700; color:#fff;
+               background:var(--red); padding:6px 12px; border-radius:999px;}
+  .upload-link:hover{filter:brightness(.93);}
   .lead{color:var(--muted); margin:16px 0 40px; font-size:.95rem;}
   .group{margin-bottom:40px;}
   .group-title{font-size:.78rem; font-weight:700; text-transform:uppercase;
@@ -213,9 +267,45 @@ INDEX_CSS = """
             border-left:1px solid var(--line);}
   .card-pdf:hover{background:rgba(201,37,44,.08);}
   .card-pdf.stale{color:var(--muted);}
+  .card-pdf.pending{color:var(--muted); cursor:default;}
   .empty{color:var(--muted);}
   footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line);
          color:var(--muted); font-size:.8rem;}
+"""
+
+UPLOAD_FORM_CSS = """
+  form.up{display:grid; gap:16px; max-width:540px;}
+  .field{display:grid; gap:6px;}
+  .field label{font-size:.85rem; font-weight:600; color:var(--ink);}
+  .field input,.field select{font:inherit; padding:10px 12px; border:1px solid var(--line);
+     border-radius:8px; background:var(--card); color:var(--ink);}
+  .hint{font-size:.78rem; color:var(--muted);}
+  label.chk{font-size:.85rem; color:var(--ink); display:flex; align-items:center; gap:8px;}
+  button.submit{font:inherit; font-weight:700; color:#fff; background:var(--red);
+     border:0; border-radius:999px; padding:12px 22px; cursor:pointer; justify-self:start;}
+  button.submit:hover{filter:brightness(.93);}
+  #result{margin-top:18px; font-size:.92rem;}
+  #result a{color:var(--red); font-weight:600;}
+  .err{color:var(--red);}
+"""
+
+UPLOAD_FORM_JS = """
+const f=document.getElementById('f'), r=document.getElementById('result');
+f.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  r.textContent='업로드 중…';
+  try{
+    const res=await fetch('/upload',{method:'POST',body:new FormData(f)});
+    let data={}; try{ data=await res.json(); }catch(_){}
+    if(res.ok){
+      r.innerHTML='✅ 게시됨: <a href="'+data.href+'">'+data.href+'</a>'
+        + (data.pdf_pending?' · <span style="color:var(--muted)">PDF 생성 중…</span>':'');
+      f.reset();
+    }else{
+      r.innerHTML='<span class="err">❌ '+(data.detail||('오류 '+res.status))+'</span>';
+    }
+  }catch(err){ r.innerHTML='<span class="err">❌ '+err+'</span>'; }
+});
 """
 
 
@@ -224,12 +314,12 @@ def render_index(docs: list) -> str:
     for d in docs:
         groups.setdefault(d["group"], []).append(d)
     for items in groups.values():
-        items.sort(key=lambda d: d["mtime"], reverse=True)  # 그룹 내 최신순
-    ordered = sorted(groups.keys(), key=lambda g: (g.count("/"), g))  # 상위 폴더 먼저
+        items.sort(key=lambda d: d["mtime"], reverse=True)
+    ordered = sorted(groups.keys(), key=lambda g: (g.count("/"), g))
 
     sections = []
     for g in ordered:
-        label = html.escape(GROUP_LABELS.get(g, g))
+        label = html.escape(_group_label(g))
         cards = []
         for d in groups[g]:
             title = html.escape(d["title"])
@@ -247,6 +337,8 @@ def render_index(docs: list) -> str:
                     f'\n            <a class="{pdf_cls}" href="{pdf_href}" download '
                     f'title="{pdf_title}">⬇ PDF</a>'
                 )
+            elif d.get("pending_pdf"):
+                pdf_link = '\n            <span class="card-pdf pending" title="PDF 자동 생성 중">PDF 생성 중…</span>'
             cards.append(
                 f"""          <li class="card">
             <a class="card-main" href="{href}">
@@ -282,6 +374,7 @@ def render_index(docs: list) -> str:
     <header class="top">
       <span class="brand">CREFLE <span class="dot">Reports</span></span>
       <span class="count">{count}건</span>
+      <a class="upload-link" href="/upload">+ 업로드</a>
     </header>
     <p class="lead">보관 중인 제안서·보고서 목록입니다. 항목을 선택하면 문서로 이동합니다.</p>
     <main>
@@ -293,16 +386,53 @@ def render_index(docs: list) -> str:
 </html>"""
 
 
+def render_upload_form() -> str:
+    opts = "".join(f'<option value="{t}">{t}</option>' for t in ("proposal", "demo", "ohmyfactory"))
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리포트 업로드 · CREFLE Reports</title>
+<style>{INDEX_CSS}{UPLOAD_FORM_CSS}</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <span class="brand">CREFLE <span class="dot">Reports</span> · 업로드</span>
+      <a class="upload-link" href="/" style="margin-left:auto;">← 목차</a>
+    </header>
+    <p class="lead">HTML 보고서(.html) 또는 자산 포함 묶음(.zip)을 올리면 즉시 게시되고 PDF가 자동 생성됩니다.</p>
+    <form class="up" id="f">
+      <div class="field"><label>문서 유형</label>
+        <select name="doc_type">{opts}</select></div>
+      <div class="field"><label>이름</label>
+        <input name="name" required placeholder="예: 삼진엘앤디 신규제안"></div>
+      <div class="field"><label>버전</label>
+        <input name="version" required placeholder="예: 1 또는 0.1"></div>
+      <div class="field"><label>파일 (.html 또는 .zip)</label>
+        <input type="file" name="file" accept=".html,.htm,.zip" required>
+        <span class="hint">자산(이미지·CSS·폰트)이 있으면 index.html 포함 .zip 으로 업로드</span></div>
+      <label class="chk"><input type="checkbox" name="overwrite" value="1"> 같은 이름·버전 덮어쓰기</label>
+      <button class="submit" type="submit">업로드 · 게시</button>
+    </form>
+    <div id="result"></div>
+  </div>
+  <script>{UPLOAD_FORM_JS}</script>
+</body>
+</html>"""
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # 앱
 # ──────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if _USING_DEFAULT_PASS:
-        logger.warning(
-            "⚠️  REPORTS_PASS 가 기본값(crefle)입니다. 운영 전 환경변수로 강한 비밀번호를 설정하세요."
-        )
-    logger.info("CREFLE Reports · 문서 루트=%s · http://%s:%s", DOCS_DIR, HOST, PORT)
+        logger.warning("⚠️  REPORTS_PASS 가 기본값(crefle)입니다. 운영 전 강한 비밀번호를 설정하세요.")
+    if not UPLOAD_PASS:
+        logger.warning("⚠️  REPORTS_UPLOAD_PASS 미설정 → 업로드(/upload)는 503 으로 비활성화됩니다.")
+    logger.info("CREFLE Reports · proposals=%s · uploads=%s · http://%s:%s", DOCS_DIR, UPLOADS_DOCS, HOST, PORT)
     yield
 
 
@@ -311,23 +441,56 @@ app = FastAPI(title="CREFLE Reports", lifespan=lifespan)
 
 @app.get("/healthz")
 def healthz() -> dict:
-    """무인증 헬스체크(도커 HEALTHCHECK 용). DOCS_DIR 접근·인증 없음."""
+    """무인증 헬스체크(도커 HEALTHCHECK 용)."""
     return {"status": "ok"}
 
 
-# 인증은 문서 라우트에만 개별 적용한다. (FastAPI 는 라우트의 dependencies=[] 로
-# 앱 전역 의존성을 끌 수 없으므로, 전역 대신 라우트별로 verify 를 건다 → /healthz 만 공개)
 @app.get("/", response_class=HTMLResponse)
 def index(_: str = Depends(verify)) -> HTMLResponse:
     return HTMLResponse(render_index(discover_documents()))
 
 
+# 업로드 라우트는 catch-all 보다 먼저 등록해야 한다(그렇지 않으면 catch-all 이 삼킴).
+@app.get("/upload", response_class=HTMLResponse)
+def upload_form(_: str = Depends(require_uploader)) -> HTMLResponse:
+    return HTMLResponse(render_upload_form())
+
+
+@app.post("/upload")
+async def upload(
+    request: Request,
+    doc_type: str = Form(...),
+    name: str = Form(...),
+    version: str = Form(...),
+    file: UploadFile = File(...),
+    overwrite: int = Form(0),
+    uploader: str = Depends(require_uploader),
+) -> JSONResponse:
+    client_ip = request.client.host if request.client else "?"
+    result = await uploads_handler.handle_upload(
+        file=file,
+        doc_type=doc_type,
+        name=name,
+        version=version,
+        client_ip=client_ip,
+        uploader=uploader,
+        overwrite=bool(overwrite),
+    )
+    return JSONResponse(result, status_code=201)
+
+
 @app.get("/{full_path:path}")
 def serve_file(full_path: str, _: str = Depends(verify)) -> FileResponse:
     candidate = (BASE_DIR / full_path).resolve()
-    if not _is_within(candidate, DOCS_DIR) or not candidate.is_file():
+    if not any(_is_within(candidate, r) for r in DOCS_ROOTS) or not candidate.is_file():
         raise HTTPException(status_code=404, detail="찾을 수 없습니다.")
-    return FileResponse(candidate, media_type=MEDIA_TYPES.get(candidate.suffix.lower()))
+    headers = {"X-Content-Type-Options": "nosniff"}
+    # 업로드된 활성 콘텐츠(HTML)엔 엄격 CSP — 업로드 JS 의 타 문서 fetch·웜·유출 차단.
+    if _is_within(candidate, UPLOADS_DOCS) and candidate.suffix.lower() in (".html", ".htm"):
+        headers["Content-Security-Policy"] = (
+            "connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+        )
+    return FileResponse(candidate, media_type=MEDIA_TYPES.get(candidate.suffix.lower()), headers=headers)
 
 
 if __name__ == "__main__":

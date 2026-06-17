@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+# CREFLE Reports — 렌더러 워커. 이 이미지에만 Chromium 이 들어간다(뷰어 이미지는 lean 유지).
+# 업로드 문서(uploads/queue)를 소비해 PDF 를 생성한다. file:// 렌더라 런타임 네트워크 불필요.
+FROM mcr.microsoft.com/playwright/python:v1.60.0-noble
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    REPORTS_UPLOADS_DIR=/work/uploads \
+    RENDER_TIMEOUT_SEC=120 \
+    HOME=/tmp
+
+WORKDIR /app
+# render_pdf.py 를 worker.py 와 같은 디렉터리에 두어 `from render_pdf import render_one` 가능.
+COPY tools/render_pdf.py ./render_pdf.py
+COPY renderer/worker.py ./worker.py
+
+# 베이스 이미지의 비루트 사용자(pwuser). Chromium 샌드박스 유지를 위해 --no-sandbox 미사용.
+USER pwuser
+
+CMD ["python", "worker.py"]
