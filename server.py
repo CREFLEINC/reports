@@ -23,20 +23,22 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
 """
 from __future__ import annotations
 
+import base64
 import html
 import logging
 import os
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+import jwt
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 import uploads_handler
 
@@ -62,6 +64,14 @@ UPLOAD_PASS = os.environ.get("REPORTS_UPLOAD_PASS", "")
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
+
+# ── 세션(무상태 JWT) 설정 ──
+SECRET_KEY = os.environ.get("REPORTS_SECRET_KEY") or secrets.token_hex(32)
+_USING_EPHEMERAL_KEY = "REPORTS_SECRET_KEY" not in os.environ
+TOKEN_TTL = int(os.environ.get("REPORTS_TOKEN_TTL", str(14 * 24 * 3600)))  # 기본 14일(초)
+COOKIE_SECURE = os.environ.get("REPORTS_COOKIE_SECURE", "0") == "1"
+COOKIE_NAME = "reports_token"
+JWT_ALG = "HS256"
 
 # 폴더 경로(서버 기준 상대) → 목차에 표시할 사람이 읽는 섹션 이름
 GROUP_LABELS = {
@@ -96,36 +106,100 @@ TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 # ──────────────────────────────────────────────────────────────────────────
 # 인증
 # ──────────────────────────────────────────────────────────────────────────
-security = HTTPBasic()
+def _eq(a: str, b: str) -> bool:
+    """상수시간 문자열 비교(UTF-8)."""
+    return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
-def verify(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    """읽기 인증."""
-    ok_user = secrets.compare_digest(credentials.username.encode("utf-8"), USERNAME.encode("utf-8"))
-    ok_pass = secrets.compare_digest(credentials.password.encode("utf-8"), PASSWORD.encode("utf-8"))
-    if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="인증이 필요합니다.",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
+def _role_for_credentials(username: str, password: str) -> str | None:
+    """자격증명 → 역할('uploader'|'reader') 또는 None. 강한 uploader 계정을 먼저 검사."""
+    if UPLOAD_PASS and _eq(username, UPLOAD_USER) and _eq(password, UPLOAD_PASS):
+        return "uploader"
+    if _eq(username, USERNAME) and _eq(password, PASSWORD):
+        return "reader"
+    return None
 
 
-def require_uploader(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    """쓰기(업로드) 인증. ← 향후 Google Workspace OAuth 로 교체할 단일 seam.
-    REPORTS_UPLOAD_PASS 미설정이면 업로드를 막는다(fail-closed)."""
+def _make_token(username: str, role: str) -> str:
+    """HS256 서명 JWT 발급(sub/role/iat/exp)."""
+    now = int(time.time())
+    return jwt.encode(
+        {"sub": username, "role": role, "iat": now, "exp": now + TOKEN_TTL},
+        SECRET_KEY,
+        algorithm=JWT_ALG,
+    )
+
+
+def _decode_token(token: str) -> dict | None:
+    """서명·만료 검증. 실패 시 None. algorithms 고정으로 alg-confusion 방어."""
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALG])
+    except jwt.InvalidTokenError:
+        return None
+
+
+def _identify(request: Request) -> tuple[str, str] | None:
+    """(user, role) 또는 None. JWT 쿠키 우선, 그다음 Basic 헤더(자동화 폴백)."""
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        payload = _decode_token(token)
+        if payload and payload.get("role") in ("reader", "uploader"):
+            return str(payload.get("sub", "")), payload["role"]
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Basic "):
+        try:
+            raw = base64.b64decode(auth[6:]).decode("utf-8")
+        except Exception:  # noqa: BLE001 — 잘못된 base64 → 미인증
+            return None
+        user, sep, pwd = raw.partition(":")
+        if not sep:
+            return None
+        role = _role_for_credentials(user, pwd)
+        if role:
+            return user, role
+    return None
+
+
+def _wants_html(request: Request) -> bool:
+    return "text/html" in request.headers.get("accept", "")
+
+
+def _safe_next(next_url: str) -> str:
+    """동일출처 상대경로만 허용(오픈리다이렉트 차단)."""
+    if next_url.startswith("/") and not next_url.startswith("//") and "\\" not in next_url:
+        return next_url
+    return "/"
+
+
+class NeedsLogin(Exception):
+    """미인증 브라우저 요청 → /login 리다이렉트 신호."""
+
+    def __init__(self, next_url: str):
+        self.next_url = next_url
+
+
+def verify(request: Request) -> str:
+    """읽기 인증: JWT 쿠키 또는 Basic 헤더. 미인증 브라우저는 /login 리다이렉트."""
+    ident = _identify(request)
+    if ident:
+        return ident[0]
+    if _wants_html(request):
+        raise NeedsLogin(request.url.path)
+    raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+
+
+def require_uploader(request: Request) -> str:
+    """쓰기 인증: uploader 역할 필요. UPLOAD_PASS 미설정이면 503(fail-closed)."""
     if not UPLOAD_PASS:
         raise HTTPException(status_code=503, detail="업로드 비활성화됨(REPORTS_UPLOAD_PASS 미설정).")
-    ok_user = secrets.compare_digest(credentials.username.encode("utf-8"), UPLOAD_USER.encode("utf-8"))
-    ok_pass = secrets.compare_digest(credentials.password.encode("utf-8"), UPLOAD_PASS.encode("utf-8"))
-    if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="업로드 인증이 필요합니다.",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
+    ident = _identify(request)
+    if ident and ident[1] == "uploader":
+        return ident[0]
+    if ident is None:
+        if _wants_html(request):
+            raise NeedsLogin(request.url.path)
+        raise HTTPException(status_code=401, detail="업로드 인증이 필요합니다.")
+    raise HTTPException(status_code=403, detail="업로드 권한이 없습니다.")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -437,6 +511,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CREFLE Reports", lifespan=lifespan)
+
+
+@app.exception_handler(NeedsLogin)
+async def _needs_login_handler(request: Request, exc: NeedsLogin) -> RedirectResponse:
+    dest = "/login"
+    nxt = _safe_next(exc.next_url)
+    if nxt != "/":
+        dest += "?next=" + quote(nxt, safe="")
+    return RedirectResponse(dest, status_code=303)
 
 
 @app.get("/healthz")

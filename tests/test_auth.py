@@ -20,3 +20,73 @@ client = TestClient(app)
 
 def test_healthz_no_auth():
     assert client.get("/healthz").status_code == 200
+
+
+def test_token_roundtrip():
+    tok = server._make_token("alice", "reader")
+    payload = server._decode_token(tok)
+    assert payload is not None
+    assert payload["sub"] == "alice"
+    assert payload["role"] == "reader"
+
+
+def test_decode_rejects_tampered():
+    assert server._decode_token("not.a.jwt") is None
+
+
+def test_decode_rejects_expired():
+    now = int(time.time())
+    tok = jwt.encode({"sub": "x", "role": "reader", "iat": now - 100, "exp": now - 10},
+                     server.SECRET_KEY, algorithm="HS256")
+    assert server._decode_token(tok) is None
+
+
+def test_role_for_credentials():
+    assert server._role_for_credentials("uploader", "uploaderpass") == "uploader"
+    assert server._role_for_credentials("reader", "readerpass") == "reader"
+    assert server._role_for_credentials("reader", "WRONG") is None
+    assert server._role_for_credentials("nobody", "x") is None
+
+
+def test_browser_unauth_redirects_to_login():
+    r = client.get("/", headers={"accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/login")
+
+
+def test_api_unauth_returns_401():
+    r = client.get("/", headers={"accept": "application/json"}, follow_redirects=False)
+    assert r.status_code == 401
+
+
+def test_basic_reader_serves_index():
+    r = client.get("/", auth=("reader", "readerpass"))
+    assert r.status_code == 200
+
+
+def test_jwt_cookie_grants_access():
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("reader", "reader"))
+    r = c.get("/", headers={"accept": "text/html"})
+    assert r.status_code == 200
+
+
+def test_tampered_cookie_redirects():
+    c = TestClient(app)
+    c.cookies.set("reports_token", "not.a.valid.jwt")
+    r = c.get("/", headers={"accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_reader_cannot_access_upload():
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("reader", "reader"))
+    r = c.get("/upload", headers={"accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_uploader_can_access_upload():
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("uploader", "uploader"))
+    r = c.get("/upload")
+    assert r.status_code == 200
