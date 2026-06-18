@@ -497,6 +497,54 @@ def render_upload_form() -> str:
 </html>"""
 
 
+LOGIN_CSS = """
+  .login{max-width:380px; margin:10vh auto 0;}
+  .login .top{justify-content:center;}
+  .login form.up{margin-top:26px;}
+  .login .notice{font-size:.9rem; color:var(--muted); margin:14px 0 0;}
+  .login .err{margin:0 0 2px;}
+"""
+
+
+def render_login_form(error: str | None = None, next_url: str = "/", loggedout: bool = False) -> str:
+    err_html = f'<p class="err">❌ {html.escape(error)}</p>' if error else ""
+    notice = '<p class="notice">로그아웃되었습니다.</p>' if loggedout else ""
+    # 전환기 보정: 구 Basic Auth 캐시를 잘못된 자격증명으로 덮어써 비운다(로그아웃 직후에만).
+    poison = (
+        "<script>(function(){try{var x=new XMLHttpRequest();"
+        "x.open('GET','/',true,'logout','logout');x.send();}catch(e){}})();</script>"
+        if loggedout else ""
+    )
+    nxt = html.escape(next_url, quote=True)
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>로그인 · CREFLE Reports</title>
+<style>{INDEX_CSS}{UPLOAD_FORM_CSS}{LOGIN_CSS}</style>
+</head>
+<body>
+  <div class="wrap login">
+    <header class="top">
+      <span class="brand">CREFLE <span class="dot">Reports</span></span>
+    </header>
+    {notice}
+    <form class="up" method="post" action="/login">
+      <input type="hidden" name="next" value="{nxt}">
+      {err_html}
+      <div class="field"><label>아이디</label>
+        <input name="username" required autofocus autocomplete="username"></div>
+      <div class="field"><label>비밀번호</label>
+        <input name="password" type="password" required autocomplete="current-password"></div>
+      <button class="submit" type="submit">로그인</button>
+    </form>
+  </div>
+  {poison}
+</body>
+</html>"""
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # 앱
 # ──────────────────────────────────────────────────────────────────────────
@@ -560,6 +608,37 @@ async def upload(
         overwrite=bool(overwrite),
     )
     return JSONResponse(result, status_code=201)
+
+
+@app.get("/login")
+def login_form(request: Request, next: str = "/", loggedout: int = 0) -> Response:
+    if _identify(request):
+        return RedirectResponse(_safe_next(next), status_code=303)
+    return HTMLResponse(render_login_form(next_url=_safe_next(next), loggedout=bool(loggedout)))
+
+
+@app.post("/login")
+def login_submit(username: str = Form(...), password: str = Form(...), next: str = Form("/")) -> Response:
+    target = _safe_next(next)
+    role = _role_for_credentials(username, password)
+    if not role:
+        return HTMLResponse(
+            render_login_form(error="아이디 또는 비밀번호가 올바르지 않습니다.", next_url=target),
+            status_code=401,
+        )
+    resp = RedirectResponse(target, status_code=303)
+    resp.set_cookie(
+        COOKIE_NAME, _make_token(username, role),
+        max_age=TOKEN_TTL, httponly=True, samesite="lax", secure=COOKIE_SECURE, path="/",
+    )
+    return resp
+
+
+@app.post("/logout")
+def logout() -> Response:
+    resp = RedirectResponse("/login?loggedout=1", status_code=303)
+    resp.delete_cookie(COOKIE_NAME, path="/")
+    return resp
 
 
 @app.get("/{full_path:path}")

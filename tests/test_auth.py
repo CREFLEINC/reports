@@ -90,3 +90,45 @@ def test_uploader_can_access_upload():
     c.cookies.set("reports_token", server._make_token("uploader", "uploader"))
     r = c.get("/upload")
     assert r.status_code == 200
+
+
+def test_login_sets_cookie_and_grants_access():
+    c = TestClient(app)
+    r = c.post("/login", data={"username": "reader", "password": "readerpass", "next": "/"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    assert "reports_token=" in r.headers.get("set-cookie", "")
+    r2 = c.get("/", headers={"accept": "text/html"})
+    assert r2.status_code == 200
+
+
+def test_login_wrong_credentials_rejected():
+    c = TestClient(app)
+    r = c.post("/login", data={"username": "reader", "password": "WRONG", "next": "/"},
+               follow_redirects=False)
+    assert r.status_code == 401
+    assert "reports_token=" not in r.headers.get("set-cookie", "")
+
+
+def test_login_open_redirect_blocked():
+    c = TestClient(app)
+    r = c.post("/login", data={"username": "reader", "password": "readerpass",
+                               "next": "//evil.example.com"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+
+
+def test_logout_clears_cookie():
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("reader", "reader"))
+    r = c.post("/logout", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/login")
+    sc = r.headers.get("set-cookie", "").lower()
+    assert "reports_token=" in sc and ("max-age=0" in sc or "expires=" in sc)
+
+
+def test_login_page_renders():
+    r = client.get("/login")
+    assert r.status_code == 200
+    assert "로그인" in r.text
