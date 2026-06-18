@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/reports-header.png" alt="CREFLE Reports 서버 — 사내 HTML 보고서를 한곳에서 열람하는 자체 호스팅 문서 서버 (FastAPI · 자동 색인 TOC · PDF 사전생성 · Self-serve Upload · hulk Docker)" width="100%" />
+</p>
+
 # CREFLE Reports 서버
 
 `proposals/` 에 보관된 HTML 보고서를, 자동 생성되는 목차(TOC)와 함께 열람할 수 있는 자체 HTML 서버입니다.

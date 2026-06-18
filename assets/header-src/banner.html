@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<style>
+  /* @import MUST precede every other rule (incl. @font-face) or Chromium drops it */
+  @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap");
+  @import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap");
+  @font-face { font-family:"Spoqa Han Sans Neo"; font-weight:300;
+    src:url("file:///Users/rangkim/.claude/skills/crefle_designer/fonts/SpoqaHanSansNeo-Light.otf") format("opentype"); }
+  @font-face { font-family:"Spoqa Han Sans Neo"; font-weight:400;
+    src:url("file:///Users/rangkim/.claude/skills/crefle_designer/fonts/SpoqaHanSansNeo-Regular.otf") format("opentype"); }
+  @font-face { font-family:"Spoqa Han Sans Neo"; font-weight:500;
+    src:url("file:///Users/rangkim/.claude/skills/crefle_designer/fonts/SpoqaHanSansNeo-Medium.otf") format("opentype"); }
+  @font-face { font-family:"Spoqa Han Sans Neo"; font-weight:700;
+    src:url("file:///Users/rangkim/.claude/skills/crefle_designer/fonts/SpoqaHanSansNeo-Bold.otf") format("opentype"); }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { background:transparent; }
+
+  /* Material Symbols base — resolves ligature names (e.g. "lock") to glyphs */
+  .material-symbols-rounded{
+    font-family:"Material Symbols Rounded"; font-weight:normal; font-style:normal;
+    line-height:1; letter-spacing:normal; text-transform:none; display:inline-block;
+    white-space:nowrap; word-wrap:normal; direction:ltr;
+    font-feature-settings:"liga"; -webkit-font-feature-settings:"liga";
+    -webkit-font-smoothing:antialiased;
+    font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24;
+  }
+
+  :root{
+    --ink:#0F0F1A; --line:#B9C3FF;
+    --t-white:#ffffff; --t-soft:#DDE1FF; --t-dim:#B9C3FF;
+    --ok:#1F883D; --warn:#E8A100; --accent:#95A6FD;
+    --font:"Spoqa Han Sans Neo","Noto Sans KR",-apple-system,BlinkMacSystemFont,sans-serif;
+    --mono:"JetBrains Mono",Menlo,monospace;
+  }
+
+  .banner{
+    position:relative; width:1280px; height:320px; overflow:hidden;
+    font-family:var(--font);
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 40px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 1px, transparent 1px 40px),
+      linear-gradient(135deg, #1A1C2E 0%, #2E4090 55%, #4758A9 100%);
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 64px;
+  }
+  /* corner registration dots — lifted from the viskit banner vocabulary */
+  .reg{ position:absolute; width:6px; height:6px; border-radius:50%;
+    background:var(--accent); opacity:.4; }
+  .reg.tl{ top:34px; left:34px } .reg.tr{ top:34px; right:34px }
+  .reg.bl{ bottom:34px; left:34px } .reg.br{ bottom:34px; right:34px }
+
+  /* ── LEFT: identity + name ───────────────────────────── */
+  .left{ display:flex; flex-direction:column; gap:18px; max-width:650px; }
+
+  .eyebrow{ display:flex; align-items:center; gap:14px; }
+  .mark{ display:flex; flex-direction:column; gap:3px; }
+  .mark .row{ display:flex; gap:3px; }
+  .mark .dot{ width:7px; height:7px; border-radius:50%; background:#E6494F; }
+  .mark .bridge{ width:7px; height:7px; position:relative; }
+  .mark .bridge::after{ content:""; position:absolute; inset:2px 0; border-radius:50%;
+    background:#E6494F; opacity:.55; }
+  .brandword{ font-weight:300; font-size:22px; letter-spacing:3px; color:#fff; }
+  .eyebrow .sep{ width:2px; height:18px; background:#E6494F; opacity:.8; }
+  .kicker{ font-weight:500; font-size:14px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--t-dim); }
+
+  .title{ font-weight:700; font-size:66px; line-height:1.04; letter-spacing:-.02em;
+    color:var(--t-white); }
+  .title .dim{ color:#C3CBFF; font-weight:300; }
+
+  .tagline{ font-weight:400; font-size:21px; line-height:1.45; color:var(--t-soft);
+    letter-spacing:-.01em; }
+
+  .chips{ display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; }
+  .chip{ font-weight:500; font-size:13px; color:var(--t-soft);
+    background:rgba(221,225,255,.10); border:1px solid rgba(185,195,255,.32);
+    border-radius:9999px; padding:5px 13px; letter-spacing:.01em; }
+
+  /* ── RIGHT: mock auth-protected TOC panel ────────────── */
+  .panel{ width:440px; height:236px; background:var(--ink);
+    border:1px solid rgba(185,195,255,.26); border-radius:14px;
+    box-shadow:0 18px 40px -12px rgba(0,0,0,.55);
+    display:flex; flex-direction:column; overflow:hidden; }
+  .panel .bar{ height:42px; flex:0 0 42px; display:flex; align-items:center; gap:10px;
+    padding:0 16px; border-bottom:1px solid rgba(255,255,255,.07); }
+  .panel .lock{ font-family:var(--mono); font-size:13px; color:var(--accent);
+    display:flex; align-items:center; gap:7px; }
+  .panel .lock .material-symbols-rounded{ font-size:16px;
+    font-variation-settings:'FILL' 1,'wght' 500,'opsz' 20; }
+  .panel .url{ font-family:var(--mono); font-size:12px; color:rgba(221,225,255,.55);
+    margin-left:auto; }
+
+  .panel .body{ flex:1; padding:14px 16px; display:flex; flex-direction:column; gap:9px; }
+  .panel .section{ font-weight:500; font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+    color:rgba(185,195,255,.65); margin-bottom:1px; }
+  .doc{ display:flex; align-items:center; gap:11px; background:rgba(255,255,255,.035);
+    border:1px solid rgba(255,255,255,.05); border-radius:9px; padding:8px 11px; }
+  .doc .ic{ color:var(--accent); display:flex; }
+  .doc .ic .material-symbols-rounded{ font-size:18px;
+    font-variation-settings:'FILL' 0,'wght' 400,'opsz' 20; }
+  .doc .meta{ display:flex; flex-direction:column; gap:4px; min-width:0; flex:1; }
+  .doc .name{ font-weight:500; font-size:13px; color:#EAEDFF; white-space:nowrap; }
+  .doc .underbar{ height:5px; border-radius:3px; background:rgba(185,195,255,.18); }
+  .doc.r1 .underbar{ width:62% } .doc.r2 .underbar{ width:48% } .doc.r3 .underbar{ width:54% }
+  .pill{ flex:0 0 auto; font-weight:600; font-size:11px; border-radius:9999px;
+    padding:4px 11px; display:flex; align-items:center; gap:5px; white-space:nowrap; }
+  .pill .material-symbols-rounded{ font-size:14px;
+    font-variation-settings:'FILL' 1,'wght' 600,'opsz' 20; }
+  .pill.pdf{ background:var(--ok); color:#fff; }
+  .pill.busy{ background:rgba(232,161,0,.16); color:#F4C657;
+    border:1px solid rgba(232,161,0,.45); }
+  .pill.busy .spin{ width:9px; height:9px; border-radius:50%;
+    border:1.6px solid rgba(244,198,87,.35); border-top-color:#F4C657; }
+</style>
+</head>
+<body>
+  <div class="banner" id="cap">
+    <span class="reg tl"></span><span class="reg tr"></span>
+    <span class="reg bl"></span><span class="reg br"></span>
+
+    <div class="left">
+      <div class="eyebrow">
+        <span class="mark">
+          <span class="row"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+          <span class="row"><span class="dot"></span><span class="bridge"></span><span class="dot"></span></span>
+          <span class="row"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+        </span>
+        <span class="brandword">CREFLE</span>
+        <span class="sep"></span>
+        <span class="kicker">사내 문서 서버</span>
+      </div>
+
+      <div class="title">Reports<span class="dim"> 서버</span></div>
+
+      <div class="tagline">사내 HTML 보고서를 한곳에서 열람하는 자체 호스팅 문서 서버</div>
+
+      <div class="chips">
+        <span class="chip">FastAPI</span>
+        <span class="chip">자동 색인 TOC</span>
+        <span class="chip">PDF 사전생성</span>
+        <span class="chip">Self-serve Upload</span>
+        <span class="chip">hulk · Docker</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="bar">
+        <span class="lock"><span class="material-symbols-rounded">lock</span>crefle</span>
+        <span class="url">reporter · :28080</span>
+      </div>
+      <div class="body">
+        <div class="section">proposals — 자동 색인</div>
+        <div class="doc r1">
+          <span class="ic"><span class="material-symbols-rounded">description</span></span>
+          <span class="meta"><span class="name">Proposal · OhMyFactory</span><span class="underbar"></span></span>
+          <span class="pill pdf"><span class="material-symbols-rounded">download</span>PDF</span>
+        </div>
+        <div class="doc r2">
+          <span class="ic"><span class="material-symbols-rounded">slideshow</span></span>
+          <span class="meta"><span class="name">Demo · Vision Inspection</span><span class="underbar"></span></span>
+          <span class="pill pdf"><span class="material-symbols-rounded">download</span>PDF</span>
+        </div>
+        <div class="doc r3">
+          <span class="ic"><span class="material-symbols-rounded">upload_file</span></span>
+          <span class="meta"><span class="name">Report · 2026 Q2</span><span class="underbar"></span></span>
+          <span class="pill busy"><span class="spin"></span>PDF 생성 중…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
