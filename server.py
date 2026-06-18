@@ -10,8 +10,12 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     GET  /            보관 문서 목차 페이지 (요청마다 두 루트를 스캔해 동적 생성)
     GET  /upload      업로드 폼 (쓰기 자격증명 필요)
     POST /upload      업로드 처리: 검증 → 원자적 게시 → 렌더 작업 enqueue
+    GET  /login       로그인 폼 (무인증)
+    POST /login       자격증명 검증 → JWT 쿠키 발급
+    POST /logout      JWT 쿠키 삭제(로그아웃)
     GET  /<경로>      문서·에셋 파일 제공 (proposals/ + uploads/docs/ 범위로만 제한)
-/healthz 외 읽기는 Basic Auth(verify), 쓰기(/upload)는 별도 자격증명(require_uploader).
+/healthz 외 읽기는 verify(JWT 쿠키 또는 Basic 헤더), 쓰기(/upload)는 require_uploader(uploader 역할).
+브라우저는 /login 으로 로그인해 JWT 쿠키를 받고 /logout 으로 비운다. Basic 헤더는 자동화(register_report.sh)용 폴백으로 유지된다.
 
 환경변수 (괄호는 기본값)
     REPORTS_USER / REPORTS_PASS            읽기 Basic Auth (crefle/crefle)
@@ -20,6 +24,9 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     REPORTS_DOCS_DIR                       git 문서 루트 (proposals)
     REPORTS_UPLOADS_DIR                    업로드 루트 (uploads)
     REPORTS_MAX_UPLOAD_MB                  업로드 최대 크기 MB (50)
+    REPORTS_SECRET_KEY                     JWT 서명 키 (미설정 시 임시 키 + 경고)
+    REPORTS_TOKEN_TTL                      토큰 수명 초 (1209600=14일)
+    REPORTS_COOKIE_SECURE                  TLS 뒤 1, 평문 HTTP 0 (기본 0)
 """
 from __future__ import annotations
 
@@ -562,6 +569,8 @@ def render_login_form(error: str | None = None, next_url: str = "/", loggedout: 
 async def lifespan(app: FastAPI):
     if _USING_DEFAULT_PASS:
         logger.warning("⚠️  REPORTS_PASS 가 기본값(crefle)입니다. 운영 전 강한 비밀번호를 설정하세요.")
+    if _USING_EPHEMERAL_KEY:
+        logger.warning("⚠️  REPORTS_SECRET_KEY 미설정 → 임시 키 사용(재시작 시 모든 로그인 무효화). 운영 전 설정하세요.")
     if not UPLOAD_PASS:
         logger.warning("⚠️  REPORTS_UPLOAD_PASS 미설정 → 업로드(/upload)는 503 으로 비활성화됩니다.")
     logger.info("CREFLE Reports · proposals=%s · uploads=%s · http://%s:%s", DOCS_DIR, UPLOADS_DOCS, HOST, PORT)

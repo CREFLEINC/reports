@@ -142,3 +142,25 @@ def test_index_shows_user_and_logout():
     assert "로그아웃" in r.text
     assert 'action="/logout"' in r.text
     assert "reader" in r.text
+
+
+@pytest.fixture
+def served_doc():
+    import shutil
+    d = server.UPLOADS_DOCS / "demo" / "pytest_doc_v1"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "index.html").write_text("<title>pytest</title>ok", encoding="utf-8")
+    url = "/" + (d / "index.html").relative_to(server.BASE_DIR).as_posix()
+    yield url
+    shutil.rmtree(server.UPLOADS_DOCS / "demo" / "pytest_doc_v1", ignore_errors=True)
+
+
+def test_basic_serves_file_regression(served_doc):
+    # register_report.sh 의 `curl -u ...` 반영확인과 동일 경로(Basic 헤더 → serve)
+    r = client.get(served_doc, auth=("reader", "readerpass"))
+    assert r.status_code == 200
+
+
+def test_serve_unauth_browser_redirects(served_doc):
+    r = client.get(served_doc, headers={"accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 303
