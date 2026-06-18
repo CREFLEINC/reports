@@ -137,6 +137,19 @@ python tools/render_pdf.py <html>           # 단일 문서
 
 **보안/범위(M1)**: 업로드 HTML 은 활성 콘텐츠다. nosniff·CSP(`connect-src 'none'` 등)·격리 렌더러·감사 로그(`uploads/audit.log`)를 적용하되, **공유 자격증명·동일 출처**라는 구조적 위험이 남는다 → **LAN 전용** 전제. 실사용자 인증(Google OAuth)은 M2, 공개 노출 시 별도 출처·TLS 는 M3 (그 전에는 공개 프록시 금지).
 
+## uploads 백업 (hulk 2nd disk)
+
+`uploads/` 는 git·rsync 미러가 아니므로 별도 백업한다. hulk 의 2nd disk(`/home/storage_disk2`)에 **매일 tar 스냅샷(14일 회전)**. 스크립트: `ops/backup-uploads.sh`.
+
+```bash
+# 최초 1회: 스크립트 설치 + cron 등록
+scp ops/backup-uploads.sh hulk@192.168.1.111:/home/hulk/working/reporter.crefle.com/
+ssh hulk@192.168.1.111 "chmod +x /home/hulk/working/reporter.crefle.com/backup-uploads.sh"
+ssh hulk@192.168.1.111 '(crontab -l 2>/dev/null | grep -v backup-uploads.sh; echo "0 3 * * * /home/hulk/working/reporter.crefle.com/backup-uploads.sh >> /home/storage_disk2/reporter-backup/backup.log 2>&1") | crontab -'
+```
+복구: `tar xzf /home/storage_disk2/reporter-backup/uploads-<날짜>.tar.gz -C <복구위치>`.
+> 동일 호스트 백업이라 **실수 삭제·루트디스크 손실엔 대비**되나 호스트 자체 손실엔 취약. 오프사이트(예: Google Drive)는 추후 보강(M4).
+
 ## 보안 강화 (보류 · 우선순위 낮음)
 
 **LAN 전용 운영을 유지하는 한 보류**한다(기능 우선, 2026-06-18 결정). 단, **공개 노출(리버스 프록시·도메인)을 붙이기 전에는 반드시 선행**해야 한다.
