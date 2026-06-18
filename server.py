@@ -345,6 +345,12 @@ INDEX_CSS = """
   .empty{color:var(--muted);}
   footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line);
          color:var(--muted); font-size:.8rem;}
+  .logout-form{display:flex; align-items:center; gap:10px; margin:0;}
+  .who{color:var(--muted); font-size:.82rem;}
+  .logout-btn{font:inherit; font-size:.82rem; font-weight:700; color:var(--ink-2);
+              background:transparent; border:1px solid var(--line); border-radius:999px;
+              padding:6px 12px; cursor:pointer;}
+  .logout-btn:hover{border-color:var(--red); color:var(--red);}
 """
 
 UPLOAD_FORM_CSS = """
@@ -383,7 +389,7 @@ f.addEventListener('submit', async (e)=>{
 """
 
 
-def render_index(docs: list) -> str:
+def render_index(docs: list, user: str) -> str:
     groups = {}
     for d in docs:
         groups.setdefault(d["group"], []).append(d)
@@ -449,6 +455,10 @@ def render_index(docs: list) -> str:
       <span class="brand">CREFLE <span class="dot">Reports</span></span>
       <span class="count">{count}건</span>
       <a class="upload-link" href="/upload">+ 업로드</a>
+      <form class="logout-form" method="post" action="/logout">
+        <span class="who">{html.escape(user)}</span>
+        <button class="logout-btn" type="submit">로그아웃</button>
+      </form>
     </header>
     <p class="lead">보관 중인 제안서·보고서 목록입니다. 항목을 선택하면 문서로 이동합니다.</p>
     <main>
@@ -577,8 +587,8 @@ def healthz() -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(_: str = Depends(verify)) -> HTMLResponse:
-    return HTMLResponse(render_index(discover_documents()))
+def index(user: str = Depends(verify)) -> HTMLResponse:
+    return HTMLResponse(render_index(discover_documents(), user))
 
 
 # 업로드 라우트는 catch-all 보다 먼저 등록해야 한다(그렇지 않으면 catch-all 이 삼킴).

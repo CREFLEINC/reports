@@ -132,3 +132,13 @@ def test_login_page_renders():
     r = client.get("/login")
     assert r.status_code == 200
     assert "로그인" in r.text
+
+
+def test_index_shows_user_and_logout():
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("reader", "reader"))
+    r = c.get("/", headers={"accept": "text/html"})
+    assert r.status_code == 200
+    assert "로그아웃" in r.text
+    assert 'action="/logout"' in r.text
+    assert "reader" in r.text
