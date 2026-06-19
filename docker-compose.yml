@@ -1,6 +1,6 @@
 services:
   reporter:                                   # 뷰어 + 업로드 API (lean, Chromium 없음)
-    image: hub.crefle.com/service/reporter:1.3
+    image: hub.crefle.com/service/reporter:1.4
     container_name: reporter
     restart: unless-stopped
     # uploads 볼륨 쓰기 + 렌더러(pwuser=uid 1001)와 소유 일치. (uploads 는 1001:1001 로 chown)
