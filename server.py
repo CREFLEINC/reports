@@ -15,7 +15,8 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     POST /logout      JWT 쿠키 삭제(로그아웃)
     GET  /<경로>      문서·에셋 파일 제공 (proposals/ + uploads/docs/ 범위로만 제한)
 /healthz 외 읽기는 verify(JWT 쿠키 또는 Basic 헤더), 쓰기(/upload)는 require_uploader(uploader 역할).
-브라우저는 /login 으로 로그인해 JWT 쿠키를 받고 /logout 으로 비운다. Basic 헤더는 자동화(register_report.sh)용 폴백으로 유지된다.
+브라우저는 /login 으로 로그인해 JWT 쿠키를 받고 /logout 으로 비운다. Basic 헤더는 자동화(register_report.sh
+등 Sec-Fetch-* 없는 클라이언트)용 폴백이며, 브라우저 요청에선 무시된다(캐시된 Basic 이 로그아웃을 무력화 못 하게).
 
 환경변수 (괄호는 기본값)
     REPORTS_USER / REPORTS_PASS            읽기 Basic Auth (crefle/crefle)
@@ -145,13 +146,24 @@ def _decode_token(token: str) -> dict | None:
         return None
 
 
+def _is_browser(request: Request) -> bool:
+    """브라우저 요청 여부. 모던 브라우저는 모든 요청에 Sec-Fetch-* 를 보내며(forbidden header
+    라 사이트·JS가 못 지움), curl 등 자동화 클라이언트는 보내지 않는다."""
+    h = request.headers
+    return "sec-fetch-site" in h or "sec-fetch-mode" in h or "sec-fetch-dest" in h
+
+
 def _identify(request: Request) -> tuple[str, str] | None:
-    """(user, role) 또는 None. JWT 쿠키 우선, 그다음 Basic 헤더(자동화 폴백)."""
+    """(user, role) 또는 None. JWT 쿠키 우선, 그다음 Basic 헤더(자동화 전용 폴백)."""
     token = request.cookies.get(COOKIE_NAME)
     if token:
         payload = _decode_token(token)
         if payload and payload.get("role") in ("reader", "uploader"):
             return str(payload.get("sub", "")), payload["role"]
+    # Basic 헤더는 자동화(curl 등)에서만 인정한다. 브라우저(Sec-Fetch-* 존재)에서는 무시 —
+    # 구 시스템의 캐시된 Basic 자격증명이 로그아웃을 무력화하지 못하게 하기 위함.
+    if _is_browser(request):
+        return None
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Basic "):
         try:
@@ -526,12 +538,6 @@ LOGIN_CSS = """
 def render_login_form(error: str | None = None, next_url: str = "/", loggedout: bool = False) -> str:
     err_html = f'<p class="err">❌ {html.escape(error)}</p>' if error else ""
     notice = '<p class="notice">로그아웃되었습니다.</p>' if loggedout else ""
-    # 전환기 보정: 구 Basic Auth 캐시를 잘못된 자격증명으로 덮어써 비운다(로그아웃 직후에만).
-    poison = (
-        "<script>(function(){try{var x=new XMLHttpRequest();"
-        "x.open('GET','/',true,'logout','logout');x.send();}catch(e){}})();</script>"
-        if loggedout else ""
-    )
     nxt = html.escape(next_url, quote=True)
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -557,7 +563,6 @@ def render_login_form(error: str | None = None, next_url: str = "/", loggedout: 
       <button class="submit" type="submit">로그인</button>
     </form>
   </div>
-  {poison}
 </body>
 </html>"""
 

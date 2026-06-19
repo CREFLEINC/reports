@@ -164,3 +164,47 @@ def test_basic_serves_file_regression(served_doc):
 def test_serve_unauth_browser_redirects(served_doc):
     r = client.get(served_doc, headers={"accept": "text/html"}, follow_redirects=False)
     assert r.status_code == 303
+
+
+# 브라우저가 보내는 Sec-Fetch-* (사이트/JS가 못 지우는 forbidden header). curl 등 자동화는 안 보냄.
+BROWSER = {
+    "accept": "text/html",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-dest": "document",
+}
+
+
+def test_browser_with_cached_basic_is_not_authenticated():
+    # 구 시스템에서 캐시된 Basic 을 브라우저가 자동 전송해도 브라우저 요청에선 무시 → 미인증.
+    r = client.get("/", headers=BROWSER, auth=("reader", "readerpass"), follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/login")
+
+
+def test_login_page_renders_for_cached_basic_browser():
+    # 캐시된 Basic 때문에 /login 이 곧장 리다이렉트되면 로그아웃 불가 → 폼이 떠야 한다.
+    r = client.get("/login", headers=BROWSER, auth=("reader", "readerpass"), follow_redirects=False)
+    assert r.status_code == 200
+    assert "로그인" in r.text
+
+
+def test_logout_fully_deauths_cached_basic_browser():
+    c = TestClient(app)
+    c.post("/logout", headers=BROWSER, auth=("reader", "readerpass"), follow_redirects=False)
+    r = c.get("/", headers=BROWSER, auth=("reader", "readerpass"), follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/login")
+
+
+def test_automation_basic_still_honored():
+    # 자동화(curl/register_report.sh): Sec-Fetch 없음 → Basic 폴백 유지(회귀 방지).
+    r = client.get("/", auth=("reader", "readerpass"))
+    assert r.status_code == 200
+
+
+def test_browser_jwt_cookie_still_works():
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("reader", "reader"))
+    r = c.get("/", headers=BROWSER)
+    assert r.status_code == 200
