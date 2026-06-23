@@ -138,6 +138,7 @@ python tools/render_pdf.py <html>           # 단일 문서
 - 접근: 목차 우측 **+ 업로드** → `/upload`. 읽기와 **별도의 쓰기 자격증명**(`REPORTS_UPLOAD_USER/PASS`)이 필요.
 - 입력: 문서 유형 · 이름 · 버전 · 파일. 경로는 서버가 생성(`uploads/docs/<type>/<이름>_v<버전>/index.html`).
 - 자산 있는 문서는 `index.html` 포함 **.zip** 으로(zip-slip·zip-bomb·심볼릭링크·확장자 검증).
+- **macOS/Windows 탐색기 zip 자동 정리**: Finder '폴더 압축'이 끼워넣는 `__MACOSX/`·`.DS_Store`·`._*`(AppleDouble)나 `Thumbs.db`·`desktop.ini` 메타데이터는 추출 시 자동 스킵된다(이전엔 `.DS_Store`의 빈 확장자가 업로드를 거부시켰음). 내용물을 단일 폴더로 감싼 zip은 그 폴더를 자동 평탄화해 `index.html`을 최상위로 끌어올린다 → **그냥 압축해서 올리면 된다.**
 - 게시 즉시 목차 노출("PDF 생성 중…") → 렌더러 워커가 PDF 생성 후 **⬇ PDF** 버튼 활성.
 - 소스 오브 트루스 = **`uploads/` 볼륨**(git 아님). 기존 git 문서와 별도 트리 → `rsync --delete proposals/` 영향 없음.
 - 아키텍처: 뷰어(lean)가 업로드 수신·게시, **격리 렌더러 워커**(Chromium·`network_mode:none`)가 `uploads/queue/` 를 소비해 PDF 생성.
