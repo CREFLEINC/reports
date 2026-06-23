@@ -96,6 +96,24 @@ def _within(child: Path, parent: Path) -> bool:
         return False
 
 
+# 탐색기가 zip 에 끼워넣는 메타데이터(게시 대상 아님). server._scan_root 의 dot-경로 무시와 일관.
+_JUNK_BASENAMES = {"thumbs.db", "desktop.ini"}
+
+
+def _is_junk_member(name: str) -> bool:
+    """탐색기 메타데이터 zip 멤버인지: __MACOSX 트리 / dot-경로 / Windows 정크.
+
+    macOS Finder: __MACOSX/, .DS_Store, ._*(AppleDouble), .fseventsd/·.Spotlight-V100/ 등.
+    Windows: Thumbs.db, desktop.ini. server._scan_root 의 'dot-경로 무시'와 동일 기준(어느
+    경로 부분이라도 '.' 으로 시작하면 정크)으로, 추출 단계에서 건너뛴다(디스크에 안 씀)."""
+    parts = Path(name).parts
+    if "__MACOSX" in parts:
+        return True
+    if any(p.startswith(".") for p in parts):
+        return True
+    return bool(parts) and parts[-1].lower() in _JUNK_BASENAMES
+
+
 def _ensure_dirs() -> None:
     for d in (UPLOADS_DOCS, QUEUE_DIR, QUEUE_DIR / "done", TMP_DIR):
         d.mkdir(parents=True, exist_ok=True)
@@ -127,6 +145,7 @@ def _extract_zip_safe(zip_path: Path, stage: Path) -> None:
     """zip 을 stage 로 안전 추출(extractall 미사용). zip-slip/bomb/symlink/확장자 방어."""
     stage.mkdir(parents=True, exist_ok=True)
     total = 0
+    wrote_any = False
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile:
@@ -143,6 +162,10 @@ def _extract_zip_safe(zip_path: Path, stage: Path) -> None:
                 _bad("zip 멤버 경로가 안전하지 않습니다(절대경로/구분자).")
             if ".." in Path(nm).parts:
                 _bad("zip 멤버에 상위경로(..)가 있습니다.")
+            # traversal 검사 뒤에 정크 스킵 — 악의적 ..는 위에서 이미 거부됨(보안 회귀 방지).
+            # 탐색기 메타데이터(__MACOSX/.DS_Store/._*/Thumbs.db)는 추출하지 않고 건너뛴다.
+            if _is_junk_member(nm):
+                continue
             mode = (zi.external_attr >> 16) & 0xFFFF
             if statmod.S_ISLNK(mode):
                 _bad("zip 내 심볼릭링크는 허용되지 않습니다.")
@@ -166,6 +189,31 @@ def _extract_zip_safe(zip_path: Path, stage: Path) -> None:
                     if total > TOTAL_UNCOMPRESSED_MAX:
                         _bad("zip 누적 압축해제 크기 상한 초과(zip-bomb 의심).")
                     out.write(chunk)
+            wrote_any = True
+    if not wrote_any:
+        _bad("zip 에 게시할 콘텐츠가 없습니다(메타데이터만 포함).")
+
+
+def _flatten_single_root(stage: Path, max_depth: int = 64) -> None:
+    """top-level 이 단일 디렉터리뿐이면 그 내용을 한 단계 끌어올린다(구조가 안정될 때까지 반복).
+
+    Finder '폴더 압축' 은 내용물을 단일 폴더로 감싼 zip 을 만든다 → top-level 에 index.html
+    이 없어 게시에 실패한다. top-level 에 디렉터리 하나만 있고 파일이 없는 동안 반복해 끌어올려
+    a/b/index.html 같은 다중·깊은 래핑도 처리한다. 매 반복마다 중첩 깊이가 1 줄어 항상 종료하며,
+    max_depth 는 비정상 입력용 러너웨이 가드다(현실 아카이브는 1~2단계). top-level 에 파일이
+    있으면(정상 구조) 건드리지 않는다."""
+    for _ in range(max_depth):
+        entries = list(stage.iterdir())
+        if len(entries) != 1 or not entries[0].is_dir():
+            return
+        inner = entries[0]
+        # inner 를 충돌 불가한 dot+uuid 이름으로 먼저 치워 stage 를 비운다. uuid 라 어떤 자식
+        # 이름과도 충돌하지 않는다(inner.name+'__lift' 같은 자식이 있어도 안전).
+        holding = inner.with_name(f".lift-{uuid.uuid4().hex}")
+        inner.rename(holding)
+        for child in list(holding.iterdir()):
+            child.rename(stage / child.name)
+        holding.rmdir()
 
 
 def _resolve_doc_html(stage: Path) -> None:
@@ -233,6 +281,7 @@ async def handle_upload(*, file: UploadFile, doc_type: str, name: str, version: 
         else:
             _extract_zip_safe(raw, stage)
             raw.unlink(missing_ok=True)
+            _flatten_single_root(stage)   # Finder '폴더 압축' 의 단일 래핑 폴더 평탄화
             _resolve_doc_html(stage)
 
         # 원자적 게시: stage → dest_dir (같은 파일시스템 rename)
