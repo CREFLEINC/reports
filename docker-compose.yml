@@ -17,6 +17,8 @@ services:
       REPORTS_SECRET_KEY: "${REPORTS_SECRET_KEY:?set a random hex secret for JWT signing}"
       REPORTS_TOKEN_TTL: "${REPORTS_TOKEN_TTL:-1209600}"
       REPORTS_COOKIE_SECURE: "${REPORTS_COOKIE_SECURE:-0}"
+      # 자료별 외부 공개 링크 베이스 URL(미설정 시 요청 Origin). 공개 레코드는 uploads/shares.json 에 영속.
+      REPORTS_PUBLIC_BASE_URL: "${REPORTS_PUBLIC_BASE_URL:-}"
       REPORTS_UPLOADS_DIR: "uploads"           # BASE_DIR(/app) 기준 → /app/uploads
       REPORTS_MAX_UPLOAD_MB: "50"
       HOST: "0.0.0.0"

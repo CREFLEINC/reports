@@ -13,8 +13,16 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     GET  /login       로그인 폼 (무인증)
     POST /login       자격증명 검증 → JWT 쿠키 발급
     POST /logout      JWT 쿠키 삭제(로그아웃)
+    POST /api/share          자료별 외부 공개 링크 생성 (uploader 전용)
+    GET  /api/share?doc=…    자료의 활성 공개 1건 조회 (uploader 전용, 모달용)
+    DELETE /api/share/{tok}  공개 해제 (uploader 전용)
+    GET  /s/{tok}            공개 랜딩(무인증): 열람·PDF 버튼 / 비번 폼 / 만료·해제 안내
+    POST /s/{tok}/unlock     비번 검증 → 잠금해제 쿠키(무인증)
+    GET  /s/{tok}/view[/…]   공개 문서·공유 에셋 제공(무인증, 형제 문서·소유외 PDF 차단)
+    GET  /s/{tok}/pdf        공개 PDF 다운로드(무인증)
     GET  /<경로>      문서·에셋 파일 제공 (proposals/ + uploads/docs/ 범위로만 제한)
-/healthz 외 읽기는 verify(JWT 쿠키 또는 Basic 헤더), 쓰기(/upload)는 require_uploader(uploader 역할).
+/healthz·/s/* 외 읽기는 verify(JWT 쿠키 또는 Basic 헤더), 쓰기(/upload)·공개관리(/api/share*)는
+require_uploader(uploader 역할). /s/* 공개 라우트는 무인증이며 토큰·비번·만료로만 접근을 제한한다.
 브라우저는 /login 으로 로그인해 JWT 쿠키를 받고 /logout 으로 비운다. Basic 헤더는 자동화(register_report.sh
 등 Sec-Fetch-* 없는 클라이언트)용 폴백이며, 브라우저 요청에선 무시된다(캐시된 Basic 이 로그아웃을 무력화 못 하게).
 
@@ -28,6 +36,9 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     REPORTS_SECRET_KEY                     JWT 서명 키 (미설정 시 임시 키 + 경고)
     REPORTS_TOKEN_TTL                      토큰 수명 초 (1209600=14일)
     REPORTS_COOKIE_SECURE                  TLS 뒤 1, 평문 HTTP 0 (기본 0)
+    REPORTS_PUBLIC_BASE_URL                공개 링크 베이스 URL (미설정 시 요청 Origin)
+    REPORTS_SHARE_UNLOCK_TTL               비번 보호 공개의 잠금해제 쿠키 수명 초 (43200=12시간)
+    REPORTS_SHARES_FILE                    공개 레코드 저장 파일 (기본 uploads/shares.json)
 """
 from __future__ import annotations
 
@@ -45,9 +56,11 @@ from urllib.parse import quote
 
 import jwt
 import uvicorn
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from pydantic import BaseModel
 
+import shares
 import uploads_handler
 
 logger = logging.getLogger("uvicorn.error")
@@ -80,6 +93,12 @@ TOKEN_TTL = int(os.environ.get("REPORTS_TOKEN_TTL", str(14 * 24 * 3600)))  # 기
 COOKIE_SECURE = os.environ.get("REPORTS_COOKIE_SECURE", "0") == "1"
 COOKIE_NAME = "reports_token"
 JWT_ALG = "HS256"
+
+# ── 공개(public share) 설정 ──
+# 공개 링크 베이스 URL. 미설정 시 요청 Origin 사용. 리버스프록시 뒤 외부 도메인이 다르면 설정.
+PUBLIC_BASE_URL = os.environ.get("REPORTS_PUBLIC_BASE_URL", "").rstrip("/")
+SHARE_UNLOCK_COOKIE = "share_unlock"  # 비번 보호 공개의 잠금해제 상태(서명 JWT). Path=/s/<token> 스코프.
+SHARE_UNLOCK_TTL = int(os.environ.get("REPORTS_SHARE_UNLOCK_TTL", str(12 * 3600)))  # 기본 12시간
 
 # 폴더 경로(서버 기준 상대) → 목차에 표시할 사람이 읽는 섹션 이름
 GROUP_LABELS = {
@@ -197,14 +216,19 @@ class NeedsLogin(Exception):
         self.next_url = next_url
 
 
-def verify(request: Request) -> str:
-    """읽기 인증: JWT 쿠키 또는 Basic 헤더. 미인증 브라우저는 /login 리다이렉트."""
+def verify_identity(request: Request) -> tuple[str, str]:
+    """읽기 인증 + 역할: (user, role). 미인증 브라우저는 /login 리다이렉트."""
     ident = _identify(request)
     if ident:
-        return ident[0]
+        return ident
     if _wants_html(request):
         raise NeedsLogin(request.url.path)
     raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+
+
+def verify(request: Request) -> str:
+    """읽기 인증: JWT 쿠키 또는 Basic 헤더. 미인증 브라우저는 /login 리다이렉트."""
+    return verify_identity(request)[0]
 
 
 def require_uploader(request: Request) -> str:
@@ -370,7 +394,164 @@ INDEX_CSS = """
               background:transparent; border:1px solid var(--line); border-radius:999px;
               padding:6px 12px; cursor:pointer;}
   .logout-btn:hover{border-color:var(--red); color:var(--red);}
+  /* 자료별 공개(share) 버튼 + 모달 */
+  .card-share{display:flex; align-items:center; gap:6px; padding:0 16px; white-space:nowrap;
+              border:0; border-left:1px solid var(--line); background:transparent; cursor:pointer;
+              color:var(--ink-2); font:inherit; font-size:.82rem; font-weight:600;}
+  .card-share:hover{background:rgba(201,37,44,.08); color:var(--red);}
+  .modal{position:fixed; inset:0; background:rgba(0,0,0,.5); display:none;
+         align-items:center; justify-content:center; z-index:9999; padding:20px;}
+  .modal.open{display:flex;}
+  .modal-dialog{position:relative; background:var(--card); border:1px solid var(--line);
+                border-radius:14px; box-shadow:var(--shadow); width:100%; max-width:440px;
+                padding:26px 26px 22px;}
+  .modal-close{position:absolute; top:10px; right:14px; background:transparent; border:0;
+               font-size:1.3rem; line-height:1; cursor:pointer; color:var(--muted);}
+  .modal-title{font-size:1.1rem; font-weight:700; margin:0 0 4px;}
+  .modal-doc{font-size:.82rem; color:var(--muted); margin:0 0 18px; word-break:break-all;}
+  .modal .field{display:grid; gap:5px; margin-bottom:14px;}
+  .modal .field label{font-size:.84rem; font-weight:600; color:var(--ink);}
+  .modal .field input{font:inherit; padding:9px 11px; border:1px solid var(--line);
+                      border-radius:8px; background:var(--bg); color:var(--ink);}
+  .modal .chk{display:flex; align-items:center; gap:8px; font-size:.86rem; color:var(--ink);
+              margin-bottom:14px;}
+  .modal .hint{font-size:.76rem; color:var(--muted);}
+  .modal-result{font-size:.84rem; margin:8px 0 0; word-break:break-all;}
+  .modal-result.err{color:var(--red);}
+  .modal-link{display:flex; gap:8px; align-items:center; margin-top:10px;}
+  .modal-link input{flex:1; min-width:0; font:inherit; font-size:.8rem; padding:8px 10px;
+                    border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink);}
+  .modal-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:18px;}
+  .btn{font:inherit; font-size:.84rem; font-weight:700; padding:9px 14px; border-radius:999px;
+       border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer;}
+  .btn:hover{border-color:var(--red);}
+  .btn.primary{background:var(--red); color:#fff; border-color:var(--red);}
+  .btn.primary:hover{filter:brightness(.93);}
+  .btn.danger{color:var(--red);}
+  .btn.danger:hover{border-color:var(--red);}
 """
+
+SHARE_MODAL_JS = """
+(function(){
+  const modal=document.getElementById('shareModal');
+  if(!modal) return;
+  const docTitle=document.getElementById('shareDocTitle');
+  const form=document.getElementById('shareForm');
+  const usePw=document.getElementById('shareUsePw');
+  const pwField=document.getElementById('sharePwField');
+  const pw=document.getElementById('sharePw');
+  const expiry=document.getElementById('shareExpiry');
+  const linkWrap=document.getElementById('shareLinkWrap');
+  const urlInput=document.getElementById('shareUrl');
+  const msg=document.getElementById('shareMsg');
+  const copyBtn=document.getElementById('shareCopy');
+  const revokeBtn=document.getElementById('shareRevoke');
+  let currentDoc=null, currentToken=null;
+
+  const fmt=d=>d.toISOString().split('T')[0];
+  const addDays=n=>{const d=new Date(); d.setDate(d.getDate()+n); return fmt(d);};
+
+  function resetForm(){
+    form.style.display=''; linkWrap.style.display='none';
+    usePw.checked=false; pwField.style.display='none'; pw.value='';
+    expiry.min=addDays(0); expiry.max=addDays(365); expiry.value=addDays(30);
+    msg.textContent=''; msg.className='modal-result';
+  }
+  function showLink(data){
+    form.style.display='none'; linkWrap.style.display='';
+    urlInput.value=data.share_url; currentToken=data.token;
+    const lock=data.has_password?'🔒 비밀번호 보호 · ':'';
+    msg.textContent='✅ '+lock+'만료일 '+data.expiry_date; msg.className='modal-result';
+  }
+  function showError(t){ msg.textContent='❌ '+t; msg.className='modal-result err';
+    form.style.display=''; linkWrap.style.display='none'; }
+
+  async function openModal(rel,title){
+    currentDoc=rel; currentToken=null;
+    docTitle.textContent=title+' · '+rel;
+    resetForm(); modal.classList.add('open');
+    try{
+      const res=await fetch('/api/share?doc='+encodeURIComponent(rel));
+      if(res.ok){const data=await res.json(); if(data.active){showLink(data);}}
+    }catch(_){}
+  }
+  const closeModal=()=>modal.classList.remove('open');
+
+  document.querySelectorAll('.card-share').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.preventDefault();openModal(btn.dataset.docRel,btn.dataset.docTitle||'');});
+  });
+  usePw.addEventListener('change',()=>{pwField.style.display=usePw.checked?'':'none'; if(usePw.checked)pw.focus();});
+  document.getElementById('shareClose').addEventListener('click',closeModal);
+  document.getElementById('shareCancel').addEventListener('click',closeModal);
+  document.getElementById('shareDone').addEventListener('click',closeModal);
+  modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    if(usePw.checked && !pw.value){showError('비밀번호를 입력하세요.');return;}
+    msg.textContent='공개 링크 생성 중…'; msg.className='modal-result';
+    const payload={doc_rel:currentDoc,use_password:usePw.checked,
+                   password:usePw.checked?pw.value:'',expiry_date:expiry.value};
+    try{
+      const res=await fetch('/api/share',{method:'POST',headers:{'Content-Type':'application/json'},
+                                          body:JSON.stringify(payload)});
+      let data={}; try{data=await res.json();}catch(_){}
+      if(res.ok){showLink(data);} else {showError(data.detail||('오류 '+res.status));}
+    }catch(err){showError(''+err);}
+  });
+  copyBtn.addEventListener('click',async()=>{
+    try{await navigator.clipboard.writeText(urlInput.value);}
+    catch(_){urlInput.select(); try{document.execCommand('copy');}catch(__){}}
+    copyBtn.textContent='✓ 복사됨'; setTimeout(()=>copyBtn.textContent='복사',1800);
+  });
+  revokeBtn.addEventListener('click',async()=>{
+    if(!currentToken)return;
+    if(!confirm('이 공개 링크를 해제할까요? 외부 접근이 즉시 차단됩니다.'))return;
+    try{
+      const res=await fetch('/api/share/'+encodeURIComponent(currentToken),{method:'DELETE'});
+      if(res.status===204||res.ok){currentToken=null;resetForm();
+        msg.textContent='공개가 해제되었습니다.';msg.className='modal-result';}
+    }catch(_){}
+  });
+})();
+"""
+
+SHARE_MODAL_HTML = """
+  <div id="shareModal" class="modal" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle">
+      <button type="button" class="modal-close" id="shareClose" aria-label="닫기">✕</button>
+      <h2 class="modal-title" id="shareModalTitle">외부 공개 링크</h2>
+      <p class="modal-doc" id="shareDocTitle"></p>
+      <form id="shareForm">
+        <label class="chk"><input type="checkbox" id="shareUsePw"> 비밀번호 사용</label>
+        <div class="field" id="sharePwField" style="display:none;">
+          <label for="sharePw">비밀번호</label>
+          <input type="password" id="sharePw" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label for="shareExpiry">공개 마감일</label>
+          <input type="date" id="shareExpiry" required>
+          <span class="hint">기본값: 오늘부터 30일 — 마감일을 자유롭게 변경하세요(최대 1년).</span>
+        </div>
+        <div class="modal-actions">
+          <button type="submit" class="btn primary">공개 링크 생성</button>
+          <button type="button" class="btn" id="shareCancel">닫기</button>
+        </div>
+      </form>
+      <div id="shareLinkWrap" style="display:none;">
+        <p class="modal-result" id="shareMsg"></p>
+        <div class="modal-link">
+          <input type="text" id="shareUrl" readonly aria-label="공개 링크">
+          <button type="button" class="btn primary" id="shareCopy">복사</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn danger" id="shareRevoke">공개 해제</button>
+          <button type="button" class="btn" id="shareDone">완료</button>
+        </div>
+      </div>
+    </div>
+  </div>"""
 
 UPLOAD_FORM_CSS = """
   form.up{display:grid; gap:16px; max-width:540px;}
@@ -408,7 +589,7 @@ f.addEventListener('submit', async (e)=>{
 """
 
 
-def render_index(docs: list, user: str) -> str:
+def render_index(docs: list, user: str, can_share: bool = False) -> str:
     groups = {}
     for d in docs:
         groups.setdefault(d["group"], []).append(d)
@@ -438,12 +619,20 @@ def render_index(docs: list, user: str) -> str:
                 )
             elif d.get("pending_pdf"):
                 pdf_link = '\n            <span class="card-pdf pending" title="PDF 자동 생성 중">PDF 생성 중…</span>'
+            share_btn = ""
+            if can_share:
+                # rel·title 은 위에서 html.escape(quote=True) 됨 → data-* 속성에 안전.
+                share_btn = (
+                    f'\n            <button type="button" class="card-share" '
+                    f'data-doc-rel="{rel}" data-doc-title="{title}" '
+                    f'title="외부 공개 링크 생성">🔗 공개</button>'
+                )
             cards.append(
                 f"""          <li class="card">
             <a class="card-main" href="{href}">
               <span class="card-title">{title}</span>
               <span class="card-meta">{rel} · {date} · {size_kb} KB</span>
-            </a>{pdf_link}
+            </a>{pdf_link}{share_btn}
           </li>"""
             )
         cards_html = "\n".join(cards)
@@ -459,6 +648,7 @@ def render_index(docs: list, user: str) -> str:
     body = "\n".join(sections) if sections else '        <p class="empty">표시할 문서가 없습니다.</p>'
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     count = len(docs)
+    share_block = (SHARE_MODAL_HTML + f"\n  <script>{SHARE_MODAL_JS}</script>") if can_share else ""
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -484,7 +674,7 @@ def render_index(docs: list, user: str) -> str:
 {body}
     </main>
     <footer>생성 {generated} · 자동 색인</footer>
-  </div>
+  </div>{share_block}
 </body>
 </html>"""
 
@@ -568,6 +758,137 @@ def render_login_form(error: str | None = None, next_url: str = "/", loggedout: 
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# 공개(public share) — 헬퍼 + 렌더
+# ──────────────────────────────────────────────────────────────────────────
+def _file_headers(candidate: Path) -> dict:
+    """파일 응답 헤더: nosniff + 업로드 활성 콘텐츠(HTML)엔 엄격 CSP(타 문서 fetch·유출 차단)."""
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if _is_within(candidate, UPLOADS_DOCS) and candidate.suffix.lower() in (".html", ".htm"):
+        headers["Content-Security-Policy"] = (
+            "connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+        )
+    return headers
+
+
+def _share_base_url(request: Request) -> str:
+    """공개 링크 베이스: 환경변수 override 우선, 없으면 요청 Origin."""
+    return PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+
+
+def _share_payload(rec: dict, request: Request) -> dict:
+    base = _share_base_url(request)
+    return {
+        "token": rec["token"],
+        "share_url": f"{base}/s/{rec['token']}",
+        "expiry_epoch": rec["expiry_epoch"],
+        "expiry_date": datetime.fromtimestamp(rec["expiry_epoch"]).strftime("%Y-%m-%d"),
+        "has_password": rec["has_password"],
+        "title": rec["title"],
+        "doc_rel": rec["doc_rel"],
+    }
+
+
+def _make_unlock_token(share_token: str) -> str:
+    """비번 보호 공개의 잠금해제 토큰(서명 JWT). _decode_token 으로 검증한다."""
+    now = int(time.time())
+    return jwt.encode(
+        {"scope": "share", "tok": share_token, "iat": now, "exp": now + SHARE_UNLOCK_TTL},
+        SECRET_KEY, algorithm=JWT_ALG,
+    )
+
+
+def _share_unlocked(request: Request, share_token: str) -> bool:
+    raw = request.cookies.get(SHARE_UNLOCK_COOKIE)
+    if not raw:
+        return False
+    payload = _decode_token(raw)
+    return bool(payload and payload.get("scope") == "share" and payload.get("tok") == share_token)
+
+
+SHARE_CSS = """
+  .share{max-width:560px; margin:8vh auto 0;}
+  .share .top{justify-content:center;}
+  .share-card{background:var(--card); border:1px solid var(--line); border-radius:14px;
+              box-shadow:var(--shadow); padding:30px 28px; margin-top:26px;}
+  .share-title{font-size:1.25rem; font-weight:700; margin:0 0 6px; color:var(--ink);}
+  .share-sub{color:var(--muted); font-size:.86rem; margin:0 0 22px; line-height:1.5;}
+  .share-actions{display:flex; flex-wrap:wrap; gap:12px;}
+  .share-btn{flex:1; min-width:160px; text-align:center; text-decoration:none; font-weight:700;
+             font-size:.95rem; padding:14px 18px; border-radius:999px; border:1px solid var(--line);
+             color:var(--ink); background:transparent;}
+  .share-btn.primary{background:var(--red); color:#fff; border-color:var(--red);}
+  .share-btn.primary:hover{filter:brightness(.93);}
+  .share-btn.ghost:hover{border-color:var(--red); color:var(--red);}
+  .share-meta{margin-top:22px; padding-top:16px; border-top:1px solid var(--line);
+              color:var(--muted); font-size:.8rem;}
+  .share .field{margin-top:18px;}
+"""
+
+
+def _share_chrome(title: str, body: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{html.escape(title)} · CREFLE Reports</title>
+<style>{INDEX_CSS}{UPLOAD_FORM_CSS}{LOGIN_CSS}{SHARE_CSS}</style>
+</head>
+<body>
+  <div class="wrap share">
+    <header class="top">
+      <span class="brand">CREFLE <span class="dot">Reports</span></span>
+    </header>
+{body}
+  </div>
+</body>
+</html>"""
+
+
+def render_share_landing(rec: dict, *, pdf_available: bool) -> str:
+    title = html.escape(rec["title"])
+    token = rec["token"]  # token_urlsafe → [A-Za-z0-9_-], URL·HTML 안전
+    expiry = datetime.fromtimestamp(rec["expiry_epoch"]).strftime("%Y-%m-%d")
+    lock = "🔒 비밀번호 보호 · " if rec["has_password"] else ""
+    pdf_btn = (
+        f'\n        <a class="share-btn ghost" href="/s/{token}/pdf">⬇ PDF 다운로드</a>'
+        if pdf_available else ""
+    )
+    body = f"""    <div class="share-card">
+      <h1 class="share-title">{title}</h1>
+      <p class="share-sub">CREFLE 가 공개한 자료입니다. 아래에서 문서를 열람하거나 PDF 를 내려받을 수 있습니다.</p>
+      <div class="share-actions">
+        <a class="share-btn primary" href="/s/{token}/view/">📄 문서 열람</a>{pdf_btn}
+      </div>
+      <p class="share-meta">{lock}공개 만료일 {expiry}</p>
+    </div>"""
+    return _share_chrome(rec["title"], body)
+
+
+def render_share_password(token: str, error: str | None = None) -> str:
+    err = f'<p class="err">❌ {html.escape(error)}</p>' if error else ""
+    body = f"""    <div class="share-card">
+      <h1 class="share-title">🔒 비밀번호 입력</h1>
+      <p class="share-sub">이 자료는 비밀번호로 보호되어 있습니다.</p>
+      {err}
+      <form class="up" method="post" action="/s/{html.escape(token, quote=True)}/unlock">
+        <div class="field"><label>비밀번호</label>
+          <input name="password" type="password" required autofocus autocomplete="off"></div>
+        <button class="submit" type="submit">열람</button>
+      </form>
+    </div>"""
+    return _share_chrome("비밀번호 입력", body)
+
+
+def render_share_gone() -> str:
+    body = """    <div class="share-card">
+      <h1 class="share-title">링크를 찾을 수 없습니다</h1>
+      <p class="share-sub">만료되었거나 해제된 공개 링크입니다. 자료 제공자에게 문의해 주세요.</p>
+    </div>"""
+    return _share_chrome("공개 링크", body)
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # 앱
 # ──────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -601,8 +922,9 @@ def healthz() -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(user: str = Depends(verify)) -> HTMLResponse:
-    return HTMLResponse(render_index(discover_documents(), user))
+def index(ident: tuple = Depends(verify_identity)) -> HTMLResponse:
+    user, role = ident
+    return HTMLResponse(render_index(discover_documents(), user, can_share=(role == "uploader")))
 
 
 # 업로드 라우트는 catch-all 보다 먼저 등록해야 한다(그렇지 않으면 catch-all 이 삼킴).
@@ -665,18 +987,139 @@ def logout() -> Response:
     return resp
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# 자료별 공개(public share) — catch-all 보다 먼저 등록해야 한다.
+# 관리 API(/api/share*)는 uploader 전용. 공개 접근(/s/*)은 무인증(토큰·비번으로만 제한).
+# ──────────────────────────────────────────────────────────────────────────
+class ShareCreateRequest(BaseModel):
+    doc_rel: str
+    use_password: bool = False
+    password: str = ""           # Python 3.9 + pydantic v2: Optional 대신 빈 문자열 기본값
+    expiry_date: str             # 'YYYY-MM-DD' (마감일)
+
+
+def _find_doc(doc_rel: str) -> dict | None:
+    """discover_documents() 화이트리스트에서 rel 일치 문서(임의 파일/server.py 공개 차단)."""
+    for d in discover_documents():
+        if d["rel"] == doc_rel:
+            return d
+    return None
+
+
+@app.post("/api/share")
+def api_share_create(req: ShareCreateRequest, request: Request,
+                     uploader: str = Depends(require_uploader)) -> JSONResponse:
+    doc = _find_doc(req.doc_rel)
+    candidate = (BASE_DIR / req.doc_rel).resolve()
+    if not doc or not any(_is_within(candidate, r) for r in DOCS_ROOTS) or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    password = req.password if req.use_password else None
+    if req.use_password and not (password and password.strip()):
+        raise HTTPException(status_code=422, detail="비밀번호를 입력하세요.")
+    try:
+        expiry = shares.compute_expiry(req.expiry_date)
+        shares.validate_expiry(expiry)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    doc_dir = candidate.parent.relative_to(BASE_DIR).as_posix()
+    rec = shares.create_share(doc_rel=req.doc_rel, doc_dir=doc_dir, title=doc["title"],
+                              password=password, expiry_epoch=expiry, created_by=uploader)
+    return JSONResponse(_share_payload(rec, request), status_code=201)
+
+
+@app.get("/api/share")
+def api_share_current(request: Request, doc: str = Query(...),
+                      _: str = Depends(require_uploader)) -> JSONResponse:
+    """해당 자료의 활성 공개 1건(모달 재오픈 시 기존 링크/해제 노출용)."""
+    rec = shares.find_active_by_doc(doc)
+    if not rec:
+        return JSONResponse({"active": False})
+    payload = _share_payload(rec, request)
+    payload["active"] = True
+    return JSONResponse(payload)
+
+
+@app.delete("/api/share/{token}")
+def api_share_delete(token: str, _: str = Depends(require_uploader)) -> Response:
+    shares.delete_share(token)  # 없는 토큰도 멱등 — 204
+    return Response(status_code=204)
+
+
+@app.get("/s/{token}")
+def share_landing(token: str, request: Request) -> Response:
+    rec = shares.get_share(token)
+    if not rec:
+        return HTMLResponse(render_share_gone(), status_code=404)
+    if rec["has_password"] and not _share_unlocked(request, token):
+        return HTMLResponse(render_share_password(token))
+    pdf_available = (BASE_DIR / rec["doc_rel"]).resolve().with_suffix(".pdf").is_file()
+    return HTMLResponse(render_share_landing(rec, pdf_available=pdf_available))
+
+
+@app.post("/s/{token}/unlock")
+def share_unlock(token: str, password: str = Form(...)) -> Response:
+    rec = shares.get_share(token)
+    if not rec:
+        return HTMLResponse(render_share_gone(), status_code=404)
+    if not rec["has_password"]:
+        return RedirectResponse(f"/s/{token}", status_code=303)
+    if not shares.verify_password(password, rec.get("pw_salt") or "", rec.get("pw_hash") or ""):
+        return HTMLResponse(render_share_password(token, error="비밀번호가 올바르지 않습니다."),
+                            status_code=401)
+    resp = RedirectResponse(f"/s/{token}", status_code=303)
+    resp.set_cookie(SHARE_UNLOCK_COOKIE, _make_unlock_token(token), max_age=SHARE_UNLOCK_TTL,
+                    httponly=True, samesite="lax", secure=COOKIE_SECURE, path=f"/s/{token}")
+    return resp
+
+
+@app.get("/s/{token}/view")
+def share_view_redirect(token: str) -> RedirectResponse:
+    # 트레일링 슬래시 → 문서의 상대 에셋(assets/…, *.css)이 /s/<token>/view/ 기준으로 해결된다.
+    return RedirectResponse(f"/s/{token}/view/", status_code=307)
+
+
+@app.get("/s/{token}/view/{subpath:path}")
+def share_view(token: str, request: Request, subpath: str = "") -> Response:
+    rec = shares.get_share(token)
+    if not rec:
+        return HTMLResponse(render_share_gone(), status_code=404)
+    if rec["has_password"] and not _share_unlocked(request, token):
+        return RedirectResponse(f"/s/{token}", status_code=303)
+    doc_dir = (BASE_DIR / rec["doc_dir"]).resolve()
+    own_html = (BASE_DIR / rec["doc_rel"]).resolve()
+    target = own_html if not subpath else (doc_dir / subpath).resolve()
+    if (not _is_within(target, doc_dir)
+            or not any(_is_within(target, r) for r in DOCS_ROOTS)
+            or not target.is_file()):
+        raise HTTPException(status_code=404, detail="찾을 수 없습니다.")
+    # 형제 문서 과다노출 차단: 소유 html 외의 .html/.htm·.pdf 거부(공유 에셋만 허용).
+    if target != own_html and target.suffix.lower() in (".html", ".htm", ".pdf"):
+        raise HTTPException(status_code=404, detail="찾을 수 없습니다.")
+    return FileResponse(target, media_type=MEDIA_TYPES.get(target.suffix.lower()),
+                        headers=_file_headers(target))
+
+
+@app.get("/s/{token}/pdf")
+def share_pdf(token: str, request: Request) -> Response:
+    rec = shares.get_share(token)
+    if not rec:
+        return HTMLResponse(render_share_gone(), status_code=404)
+    if rec["has_password"] and not _share_unlocked(request, token):
+        return RedirectResponse(f"/s/{token}", status_code=303)
+    pdf = (BASE_DIR / rec["doc_rel"]).resolve().with_suffix(".pdf")
+    if not pdf.is_file() or not any(_is_within(pdf, r) for r in DOCS_ROOTS):
+        raise HTTPException(status_code=404, detail="PDF 가 아직 준비되지 않았습니다.")
+    return FileResponse(pdf, media_type="application/pdf", filename=pdf.name,
+                        headers={"X-Content-Type-Options": "nosniff"})
+
+
 @app.get("/{full_path:path}")
 def serve_file(full_path: str, _: str = Depends(verify)) -> FileResponse:
     candidate = (BASE_DIR / full_path).resolve()
     if not any(_is_within(candidate, r) for r in DOCS_ROOTS) or not candidate.is_file():
         raise HTTPException(status_code=404, detail="찾을 수 없습니다.")
-    headers = {"X-Content-Type-Options": "nosniff"}
-    # 업로드된 활성 콘텐츠(HTML)엔 엄격 CSP — 업로드 JS 의 타 문서 fetch·웜·유출 차단.
-    if _is_within(candidate, UPLOADS_DOCS) and candidate.suffix.lower() in (".html", ".htm"):
-        headers["Content-Security-Policy"] = (
-            "connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
-        )
-    return FileResponse(candidate, media_type=MEDIA_TYPES.get(candidate.suffix.lower()), headers=headers)
+    return FileResponse(candidate, media_type=MEDIA_TYPES.get(candidate.suffix.lower()),
+                        headers=_file_headers(candidate))
 
 
 if __name__ == "__main__":
