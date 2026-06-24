@@ -87,7 +87,7 @@ python3 server.py
 
 - 서버: `ssh hulk@192.168.1.111` (docker 그룹, sudo 불필요)
 - 배포 위치: `/home/hulk/working/reporter.crefle.com/`
-- 이미지: 뷰어 `hub.crefle.com/service/reporter:1.5` + 렌더러 `hub.crefle.com/service/reporter-renderer:1.1` (둘 다 linux/amd64)
+- 이미지: 뷰어 `hub.crefle.com/service/reporter:1.6` + 렌더러 `hub.crefle.com/service/reporter-renderer:1.1` (둘 다 linux/amd64)
 - 접속: `http://192.168.1.111:28080` (로그인 `crefle`/`crefle`, `.env`로 변경)
 - 리포트는 이미지에 굽지 않고 `./proposals → /app/proposals:ro` **bind mount**로 주입한다.
   `discover_documents()`가 매 요청 스캔이므로 **파일을 추가하면 재시작 없이 즉시 반영**된다.
@@ -96,7 +96,7 @@ python3 server.py
 ```bash
 docker buildx create --name crefle-builder --driver docker-container --bootstrap --use 2>/dev/null || docker buildx use crefle-builder
 # 뷰어(lean, Chromium 없음)
-docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.5 --push .
+docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.6 --push .
 # 렌더러(Chromium 워커)
 docker buildx build --platform linux/amd64 -f Dockerfile.renderer -t hub.crefle.com/service/reporter-renderer:1.1 --push .
 ```
@@ -108,7 +108,7 @@ D=/home/hulk/working/reporter.crefle.com
 ssh hulk@192.168.1.111 "mkdir -p $D/uploads/docs $D/uploads/queue/done $D/uploads/tmp"  # 업로드 볼륨(최초 1회)
 # uploads 는 렌더러 pwuser(uid 1001) 소유여야 한다(뷰어도 compose에서 user 1001 로 실행).
 # 호스트 비루트는 다른 uid 로 chown 불가 → 루트 컨테이너로 한 번 맞춘다:
-ssh hulk@192.168.1.111 "docker run --rm --user 0:0 --entrypoint chown -v $D/uploads:/u hub.crefle.com/service/reporter:1.5 -R 1001:1001 /u"
+ssh hulk@192.168.1.111 "docker run --rm --user 0:0 --entrypoint chown -v $D/uploads:/u hub.crefle.com/service/reporter:1.6 -R 1001:1001 /u"
 scp docker-compose.yml .env.example hulk@192.168.1.111:$D/
 ssh hulk@192.168.1.111 "cd $D && cp -n .env.example .env"   # 최초 1회 — .env 의 REPORTS_UPLOAD_PASS, REPORTS_SECRET_KEY 를 강한 값으로 설정
 ssh hulk@192.168.1.111 "cd $D && docker compose pull && docker compose up -d"
