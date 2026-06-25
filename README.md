@@ -10,6 +10,7 @@
 - **언어/프레임워크**: Python · FastAPI + uvicorn
 - **목차 자동 생성**: 서버가 `proposals/` 폴더를 스캔해 매 요청마다 최신 목록을 만듭니다. 문서를 추가해도 색인을 손볼 필요가 없습니다.
 - **접근 제한**: 사람은 `/login` 으로 로그인해 JWT 쿠키를 받고 `/logout` 으로 로그아웃합니다. 자동화/CLI(`register_report.sh` 등)는 `Authorization: Basic` 헤더로 계속 접근합니다(하이브리드).
+- **자료별 외부 공개**: 각 자료에 `🔗 공개` 버튼(uploader 전용)으로 만료되는 공개 링크를 생성합니다. 비밀번호(선택)와 마감일(기본 30일·최대 1년)을 정하면, 외부인이 로그인 없이 그 자료 하나만 **열람 + PDF 다운로드**할 수 있습니다. 모달에서 링크 복사·공개 해제도 가능합니다.
 
 ## 설치
 
@@ -46,6 +47,7 @@ python3 server.py
 | `HOST` | `0.0.0.0` | 바인딩 주소 (개인 PC 전용이면 `127.0.0.1`) |
 | `PORT` | `8000` | 포트 |
 | `REPORTS_DOCS_DIR` | `proposals` | 문서 루트(서버 위치 기준 상대 경로) |
+| `REPORTS_PUBLIC_BASE_URL` | (요청 Origin) | 외부 공개 링크 베이스 URL. 프록시 뒤 외부 도메인이 다르면 설정(예: `https://reporter.crefle.com`) |
 
 > `REPORTS_PASS` 를 설정하지 않으면 기본값으로 기동하며 시작 로그에 경고가 출력됩니다.
 
@@ -60,6 +62,18 @@ python3 server.py
 `proposals/` 하위에 `.html` 파일을 두면 자동으로 목차에 나타납니다(서버 재시작 불필요).
 새 폴더의 섹션 이름을 예쁘게 표시하려면 `server.py` 의 `GROUP_LABELS` 에 매핑을 추가하세요.
 
+## 자료 외부 공개 (public share)
+
+목차에서 각 자료의 `🔗 공개` 버튼(로그인 사용자 중 **uploader 자격**에게만 노출)으로 외부 공개 링크를 만든다.
+
+- 모달에서 **비밀번호 사용 여부**와 **공개 마감일**(기본 오늘+30일, 마감일 선택 방식·최대 1년)을 정하고 링크를 생성·복사한다. 이미 공개한 자료는 모달에 현재 링크와 **공개 해제** 버튼이 나타난다.
+- 외부인은 `/s/<token>` 으로 로그인 없이 접속해 **문서 열람**(`/s/<token>/view/`)과 **PDF 다운로드**(`/s/<token>/pdf`)를 한다. 비밀번호 보호 시 입력 후 열람한다.
+- 공유는 해당 자료 하나로 한정된다 — 같은 디렉터리의 공유 에셋(CSS·이미지·폰트)은 렌더되지만 **다른 자료(형제 .html)는 노출되지 않는다.**
+- 공개 레코드는 **`uploads/shares.json`** 에 저장된다(git 아님 · `:rw` 볼륨이라 재시작·재배포에도 유지 · `ops/backup-uploads.sh` 백업 대상). 만료분은 접근 시 자동 정리된다.
+- 외부 접속 도메인이 내부망과 다르면 `.env` 의 `REPORTS_PUBLIC_BASE_URL` 로 링크 베이스를 지정한다.
+
+> 코드 변경이므로 운영 반영 시 뷰어 이미지 태그를 올려 빌드·push 후 hulk 에서 `docker compose pull && up -d` 한다(아래 배포 절차).
+
 ## 지속 실행 (선택)
 
 - 빠른 백그라운드 실행: `nohup python3 server.py > server.log 2>&1 &`
@@ -73,7 +87,7 @@ python3 server.py
 
 - 서버: `ssh hulk@192.168.1.111` (docker 그룹, sudo 불필요)
 - 배포 위치: `/home/hulk/working/reporter.crefle.com/`
-- 이미지: 뷰어 `hub.crefle.com/service/reporter:1.5` + 렌더러 `hub.crefle.com/service/reporter-renderer:1.1` (둘 다 linux/amd64)
+- 이미지: 뷰어 `hub.crefle.com/service/reporter:1.6` + 렌더러 `hub.crefle.com/service/reporter-renderer:1.1` (둘 다 linux/amd64)
 - 접속: `http://192.168.1.111:28080` (로그인 `crefle`/`crefle`, `.env`로 변경)
 - 리포트는 이미지에 굽지 않고 `./proposals → /app/proposals:ro` **bind mount**로 주입한다.
   `discover_documents()`가 매 요청 스캔이므로 **파일을 추가하면 재시작 없이 즉시 반영**된다.
@@ -82,7 +96,7 @@ python3 server.py
 ```bash
 docker buildx create --name crefle-builder --driver docker-container --bootstrap --use 2>/dev/null || docker buildx use crefle-builder
 # 뷰어(lean, Chromium 없음)
-docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.5 --push .
+docker buildx build --platform linux/amd64 -t hub.crefle.com/service/reporter:1.6 --push .
 # 렌더러(Chromium 워커)
 docker buildx build --platform linux/amd64 -f Dockerfile.renderer -t hub.crefle.com/service/reporter-renderer:1.1 --push .
 ```
@@ -94,7 +108,7 @@ D=/home/hulk/working/reporter.crefle.com
 ssh hulk@192.168.1.111 "mkdir -p $D/uploads/docs $D/uploads/queue/done $D/uploads/tmp"  # 업로드 볼륨(최초 1회)
 # uploads 는 렌더러 pwuser(uid 1001) 소유여야 한다(뷰어도 compose에서 user 1001 로 실행).
 # 호스트 비루트는 다른 uid 로 chown 불가 → 루트 컨테이너로 한 번 맞춘다:
-ssh hulk@192.168.1.111 "docker run --rm --user 0:0 --entrypoint chown -v $D/uploads:/u hub.crefle.com/service/reporter:1.5 -R 1001:1001 /u"
+ssh hulk@192.168.1.111 "docker run --rm --user 0:0 --entrypoint chown -v $D/uploads:/u hub.crefle.com/service/reporter:1.6 -R 1001:1001 /u"
 scp docker-compose.yml .env.example hulk@192.168.1.111:$D/
 ssh hulk@192.168.1.111 "cd $D && cp -n .env.example .env"   # 최초 1회 — .env 의 REPORTS_UPLOAD_PASS, REPORTS_SECRET_KEY 를 강한 값으로 설정
 ssh hulk@192.168.1.111 "cd $D && docker compose pull && docker compose up -d"

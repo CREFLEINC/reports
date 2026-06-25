@@ -19,7 +19,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 애플리케이션 소스만 복사. proposals/ 는 .dockerignore 로 제외하고 런타임 마운트로 주입.
-COPY server.py uploads_handler.py ./
+COPY server.py uploads_handler.py shares.py ./
 
 # 마운트 지점 선생성(미마운트 시에도 BASE_DIR=/app, DOCS_DIR=/app/proposals 가 깨끗히 해석되도록).
 # 비루트 사용자로 실행.
