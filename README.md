@@ -122,6 +122,40 @@ rsync -az --delete proposals/ hulk@192.168.1.111:/home/hulk/working/reporter.cre
 ```
 > 새 폴더의 목차 섹션명을 예쁘게 하려면 `server.py`의 `GROUP_LABELS`만 수정(이건 코드 변경 → 재빌드, 선택).
 
+### CI/CD 자동 배포 (매일 17:00 KST · GitHub Actions)
+
+`.github/workflows/deploy.yml` 이 매일 08:00 UTC(=17:00 KST)와 수동(`workflow_dispatch`) 시,
+**hulk 내부 self-hosted runner**(`runs-on: [self-hosted, hulk]`)에서 `ops/deploy.sh` 를 실행한다.
+GitHub 클라우드는 사내망 hulk/Harbor에 접근할 수 없으므로 실제 빌드·배포는 hulk 로컬에서 일어난다.
+
+- **변경 판정**: 배포 디렉터리의 `.deployed_sha` 마커와 main HEAD 를 비교. 같으면 skip.
+  다르면 `git diff` 로 경로를 분류해 **proposals 만 바뀌면 rsync**, **코드가 바뀌면 해당 이미지 재빌드**.
+- **게이트**: 배포 전 `python:3.12-slim` 컨테이너에서 pytest 실행, 실패 시 배포 중단.
+- **태그**: 빌드는 immutable `:<short-sha>` 로 push 하고 `.env` 의 `REPORTER_TAG`/`RENDERER_TAG` 를 갱신.
+- **헬스체크·롤백**: 배포 후 `/healthz` 확인, 실패 시 이전 태그로 자동 롤백(마커 미갱신).
+- **실패 알림**: GitHub Actions 실패 시 repo watcher 에게 이메일.
+
+**러너 설치 (hulk, 최초 1회):**
+```bash
+mkdir -p ~/actions-runner && cd ~/actions-runner
+# 최신 러너 버전은 https://github.com/actions/runner/releases 참조
+curl -o actions-runner-linux-x64.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v2.XYZ/actions-runner-linux-x64-2.XYZ.tar.gz
+tar xzf actions-runner-linux-x64.tar.gz
+# 등록 토큰: GitHub repo Settings → Actions → Runners → New self-hosted runner 에서 발급
+./config.sh --url https://github.com/CREFLEINC/reports --token <REG_TOKEN> --labels hulk --unattended
+sudo ./svc.sh install hulk && sudo ./svc.sh start   # systemd 상시화(재부팅 자동 복구)
+```
+
+**수동 배포/롤백:**
+- 수동 실행: GitHub Actions → daily-deploy → Run workflow.
+- 롤백: 배포 디렉터리 `.env` 의 `REPORTER_TAG`/`RENDERER_TAG` 를 직전 SHA 로 바꾸고
+  `docker compose up -d`. (실패 배포는 자동 롤백되므로 보통 불필요.)
+
+> ⚠️ **COPY 트랩**: 새 최상위 파이썬 모듈(예: `foo.py`)을 추가하면 반드시 `Dockerfile` 의
+> `COPY server.py uploads_handler.py shares.py ./` 줄에 추가할 것. 빠뜨리면 이미지에 모듈이 없어
+> 컨테이너가 import 에서 크래시한다. 자동 배포의 헬스체크가 이를 잡아 롤백하지만, 원인 수정이 필요하다.
+
 ## PDF 다운로드 (사전생성)
 
 각 문서의 PDF를 **미리 생성**해 `proposals/<문서>.pdf` 로 함께 보관하고, 목차 카드의 **⬇ PDF**
