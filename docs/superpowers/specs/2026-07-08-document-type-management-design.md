@@ -35,11 +35,14 @@
 - **이름 변경 = 라벨만**(슬러그/폴더 불변). **기타는 삭제·변경 불가**.
 - **삭제 = 레지스트리 제거 + 문서 폴더를 기타로 이동 + 활성 공개링크 재지정**.
 
-## 4. 데이터 모델 · 저장 (`types.py` + `uploads/types.json`)
+> **모듈명 주의**: 파이썬 stdlib `types` 를 가리지 않도록 모듈 파일명은 `doctypes.py` 로 한다
+> (데이터 파일 `uploads/types.json`·라우트 `/types`·env `REPORTS_TYPES_FILE` 는 그대로).
+
+## 4. 데이터 모델 · 저장 (`doctypes.py` + `uploads/types.json`)
 
 `shares.py` 패턴을 그대로 따르는 순수 모듈. server를 import하지 않고 환경변수로 독립 설정.
 `uploads/types.json`에 영속(원자적 tmp→`os.replace`, `threading.Lock`). 테스트는 모듈 전역
-`types.TYPES_FILE` 를 임시 파일로 덮어써 격리(`REPORTS_TYPES_FILE` env도 지원).
+`doctypes.TYPES_FILE` 를 임시 파일로 덮어써 격리(`REPORTS_TYPES_FILE` env도 지원).
 
 스키마(JSON, 순서 보존 배열):
 ```json
@@ -56,7 +59,7 @@
 
 **불변식**: `etc`(기타)는 load 시 항상 존재하도록 보장. 슬러그 유일.
 
-## 5. 함수 (`types.py`)
+## 5. 함수 (`doctypes.py`)
 
 - `load_types() -> list[dict]` — 없으면 시드; `etc` 보장; 순서 반환.
 - `add_type(slug, label) -> dict` — 슬러그 검증(`_TYPE_RE` 재사용) + 라벨 정리; **중복이면 `ValueError`**.
@@ -80,42 +83,42 @@
    `<name>_3`… 으로 회피.
 2. 활성 공개 링크 재지정: `shares.py`에 `rebase_doc_paths(old_prefix, new_prefix)` 헬퍼 추가 —
    `doc_rel`/`doc_dir`가 `docs/<slug>/`로 시작하는 레코드를 `docs/etc/`로 재작성(링크 유지).
-3. 비게 된 `uploads/docs/<slug>/` 폴더 제거. 그 후 `types.delete_type(slug)`.
+3. 비게 된 `uploads/docs/<slug>/` 폴더 제거. 그 후 `doctypes.delete_type(slug)`.
 
 경로 안전: 이동 대상은 반드시 `uploads/docs/` 하위여야 함(`_within` 재사용).
 
 ## 8. 통합 지점
 
-- `render_upload_form()`: 하드코딩 튜플 → `types.load_types()`로 `<option value="slug">label</option>`.
+- `render_upload_form()`: 하드코딩 튜플 → `doctypes.load_types()`로 `<option value="slug">label</option>`.
   헤더에 "유형 관리(`/types`)" 링크 추가.
-- `_group_label(g)`: `uploads/<slug>` → `types.label_for(slug)` 사용(없으면 기존 fallback 유지).
+- `_group_label(g)`: `uploads/<slug>` → `doctypes.label_for(slug)` 사용(없으면 기존 fallback 유지).
 - `render_types_page()`: 신규 관리 페이지(목록 + 추가폼 + 행별 이름변경/삭제, `etc`는 비활성). 소규모 JS로
   `/api/types` 호출. 슬러그 자동 제안(이름의 ASCII 소문자화, 비-ASCII면 빈칸 → 사용자 입력).
 - (선택) `uploads_handler`: 업로드 시 미등록 슬러그 거부는 하지 않음(유연성). 형식 검증만 유지 —
   단, 업로드 폼은 등록된 유형만 노출하므로 실사용상 등록 유형으로 수렴.
 
-## 9. 테스트 (`tests/test_types.py`, httpx TestClient)
+## 9. 테스트 (`tests/test_doctypes.py`, httpx TestClient)
 
 - 레지스트리: 시드, `etc` 보장, add/rename/delete, 순서.
 - 예외: 중복 추가(ValueError/409), `etc` 삭제·변경 차단, 삭제 시 문서 이동(+이름 충돌), 공유 재지정.
 - API: 401(uploader 아님), 409(중복), PATCH/DELETE 결과, `count` 정확.
 - 통합: 업로드 폼이 레지스트리 반영(라벨 노출), 인덱스 그룹 라벨.
-- 테스트 격리: `types.TYPES_FILE`·`shares.SHARES_FILE`·`UPLOADS_DOCS`를 tmp로 지정.
+- 테스트 격리: `doctypes.TYPES_FILE`·`shares.SHARES_FILE`·`UPLOADS_DOCS`를 tmp로 지정.
 
 ## 10. 신규/변경 파일
 
 | 파일 | 변경 |
 |------|------|
-| `types.py` | 신규 — 레지스트리 순수 모듈 |
-| `tests/test_types.py` | 신규 — 단위·API 테스트 |
+| `doctypes.py` | 신규 — 레지스트리 순수 모듈 |
+| `tests/test_doctypes.py` | 신규 — 단위·API 테스트 |
 | `server.py` | `/api/types*` 라우트, `/types` 페이지, 업로드 폼·`_group_label` 통합, 삭제 조율 |
 | `shares.py` | `rebase_doc_paths()` 헬퍼(삭제 이동 시 링크 재지정) |
-| `Dockerfile` | **`COPY` 줄에 `types.py` 추가** (누락 시 컨테이너 import 크래시 — 과거 shares.py 트랩) |
+| `Dockerfile` | **`COPY` 줄에 `doctypes.py` 추가** (누락 시 컨테이너 import 크래시 — 과거 shares.py 트랩) |
 | `README.md` | "문서 유형 관리" 섹션 |
 
 ## 11. 리스크 & 완화
 
-- **Dockerfile COPY 누락**: 새 최상위 모듈 `types.py`를 반드시 COPY에 추가(헬스체크가 잡지만 원인 예방).
+- **Dockerfile COPY 누락**: 새 최상위 모듈 `doctypes.py`를 반드시 COPY에 추가(헬스체크가 잡지만 원인 예방).
 - **삭제 중 크래시**: 문서 이동 → 공유 재지정 → 레지스트리 제거 순서. 이동을 먼저 끝내고 마지막에 레지스트리
   제거하므로 중단 시에도 "이동됐지만 유형은 남음" 상태(재시도로 수렴). 데이터 유실 없음.
 - **동시성**: 레지스트리 쓰기는 `_LOCK`. 문서 이동은 uploader 단독 조작 전제(낮은 동시성).

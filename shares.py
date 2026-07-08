@@ -177,3 +177,30 @@ def find_active_by_doc(doc_rel: str) -> dict | None:
         if not matches:
             return None
         return max(matches, key=lambda r: r.get("created_at", 0))
+
+
+def rebase_doc_paths(dir_map: dict) -> int:
+    """문서 디렉터리 이동에 맞춰 공개 링크의 경로를 재작성(링크 유지). 재작성 건수 반환.
+
+    dir_map: {old_doc_dir: new_doc_dir} — 둘 다 'docs/<type>/<name>_v<ver>' 형태(BASE_DIR 기준).
+    유형 삭제로 문서가 기타 폴더로 이동될 때 server 가 실제 이동 매핑으로 호출한다.
+    doc_dir 이 정확히 old 이거나 doc_rel 이 old + '/' 로 시작하는 레코드를 new 로 옮긴다.
+    """
+    if not dir_map:
+        return 0
+    changed = 0
+    with _LOCK:
+        data = _read_raw()
+        for rec in data.values():
+            old = rec.get("doc_dir", "")
+            new = dir_map.get(old)
+            if not new:
+                continue
+            rec["doc_dir"] = new
+            dr = rec.get("doc_rel", "")
+            if isinstance(dr, str) and dr.startswith(old + "/"):
+                rec["doc_rel"] = new + dr[len(old):]
+            changed += 1
+        if changed:
+            _write_raw(data)
+    return changed

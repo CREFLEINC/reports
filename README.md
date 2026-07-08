@@ -193,6 +193,24 @@ python tools/render_pdf.py <html>           # 단일 문서
 
 **보안/범위(M1)**: 업로드 HTML 은 활성 콘텐츠다. nosniff·CSP(`connect-src 'none'` 등)·격리 렌더러·감사 로그(`uploads/audit.log`)를 적용하되, **공유 자격증명·동일 출처**라는 구조적 위험이 남는다 → **LAN 전용** 전제. 실사용자 인증(Google OAuth)은 M2, 공개 노출 시 별도 출처·TLS 는 M3 (그 전에는 공개 프록시 금지).
 
+## 문서 유형 관리 (이슈 #6)
+
+업로드 문서 유형(`uploads/docs/<슬러그>/` 폴더)을 uploader 가 직접 추가·이름변경·삭제한다. 예전에는 유형이
+코드에 하드코딩돼 있었다.
+
+- 접근: 업로드 페이지(`/upload`) 우측 **유형 관리** → `/types`(uploader 전용).
+- 유형 = `{슬러그(영문 폴더 키) · 라벨(표시 이름)}`. 추가 시 이름(한글)과 슬러그(영문, 이름에서 자동 제안)를
+  입력한다. 업로드 드롭다운·목차 그룹 라벨이 이 레지스트리를 반영한다.
+- **기타(etc)**: 삭제·이름변경 불가한 기본 유형. 유형을 삭제하면 그 유형의 문서는 **기타로 일괄 이동**되고
+  (이름 충돌 시 `_2`… 로 회피), 해당 문서의 **활성 공개 링크도 새 경로로 재지정**되어 유지된다.
+- 예외: 이미 존재하는 슬러그 추가는 알림(HTTP 409)으로 거부한다.
+- 저장: **`uploads/types.json`**(원자적 write + Lock, `:rw` 볼륨, 백업 대상). 파일이 없으면 기존 유형과
+  실재 폴더에서 자동 시드한다. 모듈은 `doctypes.py`(순수, stdlib `types` 를 가리지 않는 이름).
+- ⚠️ **배포 함정(shares.py 와 동일)**: `Dockerfile` 의 `COPY … doctypes.py …` 에서 이 모듈이 빠지면
+  컨테이너가 `import` 에서 크래시한다. 새 최상위 모듈 추가 시 반드시 COPY 줄에 넣을 것.
+- API(uploader 전용): `GET/POST /api/types`, `PATCH/DELETE /api/types/{슬러그}`. 라우트/테스트:
+  `tests/test_doctypes.py`. 설계: `docs/superpowers/specs/2026-07-08-document-type-management-design.md`.
+
 ## uploads 백업 (hulk 2nd disk)
 
 `uploads/` 는 git·rsync 미러가 아니므로 별도 백업한다. hulk 의 2nd disk(`/home/storage_disk2`)에 **매일 tar 스냅샷(14일 회전)**. 스크립트: `ops/backup-uploads.sh`.

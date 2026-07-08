@@ -48,6 +48,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -60,6 +61,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
+import doctypes
 import shares
 import uploads_handler
 
@@ -332,7 +334,8 @@ def _group_label(g: str) -> str:
     if g == "uploads":
         return "업로드 (웹 등록)"
     if g.startswith("uploads/"):
-        return "업로드 · " + g.split("/", 1)[1]
+        slug = g.split("/", 1)[1]
+        return doctypes.label_for(slug) or ("업로드 · " + slug)
     return g
 
 
@@ -680,7 +683,10 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
 
 
 def render_upload_form() -> str:
-    opts = "".join(f'<option value="{t}">{t}</option>' for t in ("proposal", "demo", "ohmyfactory"))
+    opts = "".join(
+        f'<option value="{html.escape(t["slug"])}">{html.escape(t["label"])}</option>'
+        for t in doctypes.load_types()
+    )
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -693,7 +699,8 @@ def render_upload_form() -> str:
   <div class="wrap">
     <header class="top">
       <span class="brand">CREFLE <span class="dot">Reports</span> · 업로드</span>
-      <a class="upload-link" href="/" style="margin-left:auto;">← 목차</a>
+      <a class="upload-link" href="/types" style="margin-left:auto;">유형 관리</a>
+      <a class="upload-link" href="/">← 목차</a>
     </header>
     <p class="lead">HTML 보고서(.html) 또는 자산 포함 묶음(.zip)을 올리면 즉시 게시되고 PDF가 자동 생성됩니다.</p>
     <form class="up" id="f">
@@ -712,6 +719,125 @@ def render_upload_form() -> str:
     <div id="result"></div>
   </div>
   <script>{UPLOAD_FORM_JS}</script>
+</body>
+</html>"""
+
+
+TYPES_PAGE_CSS = """
+  .types-wrap{max-width:660px;}
+  table.types{width:100%; border-collapse:collapse; margin-top:6px;}
+  table.types th, table.types td{padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle;}
+  table.types th{font-size:.74rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-weight:600;}
+  table.types td.slug{font-family:ui-monospace,Menlo,monospace; color:var(--muted); font-size:.84rem;}
+  table.types td.count{color:var(--muted); font-size:.84rem; text-align:right; font-variant-numeric:tabular-nums;}
+  table.types td.act{text-align:right; white-space:nowrap;}
+  .badge-etc{font-size:.7rem; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:1px 8px; margin-left:8px;}
+  .tbtn{border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; padding:4px 10px; font-size:.82rem; cursor:pointer; margin-left:6px;}
+  .tbtn.danger{color:var(--red); border-color:var(--red);}
+  .tbtn:disabled{opacity:.35; cursor:not-allowed;}
+  form.addtype{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:22px;
+    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px;}
+  form.addtype .field{flex:1; min-width:150px; margin:0;}
+  form.addtype label{display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px;}
+  form.addtype input{width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:9px;
+    background:var(--bg); color:var(--ink); font-size:.92rem;}
+  #tmsg{margin:12px 0 0; font-size:.88rem; min-height:1.2em;}
+  #tmsg.ok{color:#1e7e34;} #tmsg.err{color:var(--red);}
+"""
+
+TYPES_PAGE_JS = r"""
+const $ = (s,el=document)=>el.querySelector(s);
+const tbody = $('#trows'), msg = $('#tmsg');
+function say(t, ok){ msg.textContent=t; msg.className = ok?'ok':'err'; }
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+async function api(method, url, body){
+  const opt={method, headers:{}};
+  if(body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+  const r = await fetch(url, opt);
+  let data=null; try{ data=await r.json(); }catch(e){}
+  return {ok:r.ok, status:r.status, data};
+}
+function row(t){
+  const tr=document.createElement('tr');
+  const etc = t.builtin;
+  tr.innerHTML =
+    '<td class="lbl">'+esc(t.label)+(etc?'<span class="badge-etc">기본</span>':'')+'</td>'+
+    '<td class="slug">'+esc(t.slug)+'</td>'+
+    '<td class="count">'+t.count+'</td>'+
+    '<td class="act">'+
+      '<button class="tbtn ren" '+(etc?'disabled':'')+'>이름변경</button>'+
+      '<button class="tbtn danger del" '+(etc?'disabled':'')+'>삭제</button>'+
+    '</td>';
+  if(!etc){
+    tr.querySelector('.ren').onclick = ()=>renameType(t);
+    tr.querySelector('.del').onclick = ()=>delType(t);
+  }
+  return tr;
+}
+async function loadTypes(){
+  const {ok,data} = await api('GET','/api/types');
+  if(!ok){ say('목록을 불러오지 못했습니다.', false); return; }
+  tbody.innerHTML=''; data.forEach(t=>tbody.appendChild(row(t)));
+}
+async function renameType(t){
+  const nl = prompt('새 이름 (현재: '+t.label+')', t.label);
+  if(nl===null) return;
+  const {ok,status,data} = await api('PATCH','/api/types/'+encodeURIComponent(t.slug), {label:nl});
+  if(ok){ say('이름을 변경했습니다.', true); loadTypes(); }
+  else say((data&&data.detail)||('변경 실패 ('+status+')'), false);
+}
+async function delType(t){
+  const warn = t.count>0 ? ('이 유형의 문서 '+t.count+'건이 "기타"로 이동됩니다.\n') : '';
+  if(!confirm(warn+'유형 "'+t.label+'"을(를) 삭제할까요?')) return;
+  const {ok,status,data} = await api('DELETE','/api/types/'+encodeURIComponent(t.slug));
+  if(ok){ say('삭제했습니다.'+(data&&data.moved?(' ('+data.moved+'건 기타로 이동)'):''), true); loadTypes(); }
+  else say((data&&data.detail)||('삭제 실패 ('+status+')'), false);
+}
+$('#tname').addEventListener('input', e=>{
+  const sl=$('#tslug'); if(sl.dataset.touched) return;
+  sl.value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,31);
+});
+$('#tslug').addEventListener('input', e=>{ e.target.dataset.touched='1'; });
+$('#addtype').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const label=$('#tname').value, slug=$('#tslug').value;
+  const {ok,status,data} = await api('POST','/api/types', {slug, label});
+  if(ok){ say('유형을 추가했습니다.', true); $('#tname').value=''; $('#tslug').value=''; $('#tslug').dataset.touched=''; loadTypes(); }
+  else say((data&&data.detail)||('추가 실패 ('+status+')'), false);
+});
+loadTypes();
+"""
+
+
+def render_types_page() -> str:
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>문서 유형 관리 · CREFLE Reports</title>
+<style>{INDEX_CSS}{UPLOAD_FORM_CSS}{TYPES_PAGE_CSS}</style>
+</head>
+<body>
+  <div class="wrap types-wrap">
+    <header class="top">
+      <span class="brand">CREFLE <span class="dot">Reports</span> · 유형 관리</span>
+      <a class="upload-link" href="/upload" style="margin-left:auto;">← 업로드</a>
+      <a class="upload-link" href="/">목차</a>
+    </header>
+    <p class="lead">업로드 문서 유형을 추가·이름변경·삭제합니다. "기타"는 기본 유형이라 변경·삭제할 수 없고, 유형을 삭제하면 그 문서는 기타로 이동합니다.</p>
+    <table class="types">
+      <thead><tr><th>이름</th><th>슬러그</th><th style="text-align:right;">문서</th><th></th></tr></thead>
+      <tbody id="trows"></tbody>
+    </table>
+    <form class="addtype" id="addtype">
+      <div class="field"><label>이름 (표시명)</label><input id="tname" required placeholder="예: 보고서" autocomplete="off"></div>
+      <div class="field"><label>슬러그 (영문 폴더 키)</label><input id="tslug" required placeholder="예: report" autocomplete="off" pattern="[a-z0-9][a-z0-9_-]{{0,30}}"></div>
+      <button class="submit" type="submit" style="flex:0 0 auto;">추가</button>
+    </form>
+    <div id="tmsg"></div>
+  </div>
+  <script>{TYPES_PAGE_JS}</script>
 </body>
 </html>"""
 
@@ -1111,6 +1237,98 @@ def share_pdf(token: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="PDF 가 아직 준비되지 않았습니다.")
     return FileResponse(pdf, media_type="application/pdf", filename=pdf.name,
                         headers={"X-Content-Type-Options": "nosniff"})
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 문서 유형 관리 (uploader 전용) — catch-all 보다 먼저 등록해야 한다.
+# ──────────────────────────────────────────────────────────────────────────
+class TypeCreateRequest(BaseModel):
+    slug: str
+    label: str
+
+
+class TypeLabelRequest(BaseModel):
+    label: str
+
+
+def _type_doc_count(slug: str) -> int:
+    d = (UPLOADS_DOCS / slug).resolve()
+    if not _is_within(d, UPLOADS_DOCS) or not d.is_dir():
+        return 0
+    return sum(1 for c in d.iterdir() if c.is_dir())
+
+
+def _move_type_docs_to_etc(slug: str) -> tuple[int, dict]:
+    """uploads/docs/<slug>/ 하위 문서 디렉터리를 uploads/docs/etc/ 로 이동.
+    (이동 건수, {old_doc_dir_rel: new_doc_dir_rel}) 반환. 이름 충돌 시 _2.. 로 회피."""
+    src = (UPLOADS_DOCS / slug).resolve()
+    if not _is_within(src, UPLOADS_DOCS) or not src.is_dir():
+        return 0, {}
+    dst_root = (UPLOADS_DOCS / doctypes.BUILTIN_SLUG).resolve()
+    dst_root.mkdir(parents=True, exist_ok=True)
+    dir_map: dict = {}
+    for child in sorted(src.iterdir()):
+        if not child.is_dir():
+            continue
+        target = dst_root / child.name
+        n = 2
+        while target.exists():
+            target = dst_root / f"{child.name}_{n}"
+            n += 1
+        old_rel = child.resolve().relative_to(BASE_DIR).as_posix()
+        shutil.move(str(child), str(target))
+        dir_map[old_rel] = target.resolve().relative_to(BASE_DIR).as_posix()
+    shutil.rmtree(src, ignore_errors=True)
+    return len(dir_map), dir_map
+
+
+@app.get("/types", response_class=HTMLResponse)
+def types_page(_: str = Depends(require_uploader)) -> HTMLResponse:
+    return HTMLResponse(render_types_page())
+
+
+@app.get("/api/types")
+def api_types_list(_: str = Depends(require_uploader)) -> JSONResponse:
+    return JSONResponse([{**t, "count": _type_doc_count(t["slug"])} for t in doctypes.load_types()])
+
+
+@app.post("/api/types")
+def api_types_create(req: TypeCreateRequest, _: str = Depends(require_uploader)) -> JSONResponse:
+    try:
+        rec = doctypes.add_type(req.slug, req.label)
+    except ValueError as e:
+        msg = str(e)
+        raise HTTPException(status_code=409 if "이미 존재" in msg else 422, detail=msg)
+    return JSONResponse({**rec, "count": 0}, status_code=201)
+
+
+@app.patch("/api/types/{slug}")
+def api_types_rename(slug: str, req: TypeLabelRequest,
+                     _: str = Depends(require_uploader)) -> JSONResponse:
+    try:
+        rec = doctypes.rename_type(slug, req.label)
+    except ValueError as e:
+        msg = str(e)
+        raise HTTPException(status_code=404 if "존재하지 않" in msg else 422, detail=msg)
+    return JSONResponse({**rec, "count": _type_doc_count(rec["slug"])})
+
+
+@app.delete("/api/types/{slug}")
+def api_types_delete(slug: str, _: str = Depends(require_uploader)) -> JSONResponse:
+    try:
+        norm = doctypes.normalize_slug(slug)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    existing = {t["slug"]: t for t in doctypes.load_types()}
+    if norm not in existing:
+        raise HTTPException(status_code=404, detail="존재하지 않는 유형입니다.")
+    if existing[norm].get("builtin"):
+        raise HTTPException(status_code=400, detail="기본 유형(기타)은 삭제할 수 없습니다.")
+    moved, dir_map = _move_type_docs_to_etc(norm)
+    if dir_map:
+        shares.rebase_doc_paths(dir_map)
+    doctypes.delete_type(norm)
+    return JSONResponse({"slug": norm, "moved": moved})
 
 
 @app.get("/{full_path:path}")
