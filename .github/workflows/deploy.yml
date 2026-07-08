@@ -1,0 +1,26 @@
+name: daily-deploy
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 08:00 UTC = 17:00 KST (지연 허용)
+  workflow_dispatch:       # 수동 실행 / 롤백 / 테스트
+
+# 동시 실행 방지(겹치면 앞선 실행을 기다림, 취소하지 않음).
+concurrency:
+  group: daily-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, hulk]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (full history — SHA 게이팅 diff 용)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Deploy
+        run: bash ops/deploy.sh
+        env:
+          DEPLOY_DIR: /home/hulk/working/reporter.crefle.com
+          REGISTRY: hub.crefle.com
