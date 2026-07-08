@@ -1,6 +1,6 @@
 services:
   reporter:                                   # 뷰어 + 업로드 API (lean, Chromium 없음)
-    image: hub.crefle.com/service/reporter:1.6
+    image: ${REGISTRY:-hub.crefle.com}/service/reporter:${REPORTER_TAG:-1.6}
     container_name: reporter
     restart: unless-stopped
     # uploads 볼륨 쓰기 + 렌더러(pwuser=uid 1001)와 소유 일치. (uploads 는 1001:1001 로 chown)
@@ -34,7 +34,7 @@ services:
       start_period: 10s
 
   renderer:                                    # PDF 워커 (Chromium 전용·격리)
-    image: hub.crefle.com/service/reporter-renderer:1.1
+    image: ${REGISTRY:-hub.crefle.com}/service/reporter-renderer:${RENDERER_TAG:-1.1}
     container_name: reporter-renderer
     restart: unless-stopped
     init: true                                 # 좀비 chromium 프로세스 reaping
