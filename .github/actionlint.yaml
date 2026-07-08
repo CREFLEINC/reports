@@ -1,0 +1,5 @@
+# actionlint 설정 — hulk 내부 self-hosted 러너의 커스텀 라벨 선언.
+# (없으면 actionlint 가 runs-on 의 'hulk' 를 unknown label 로 오탐.)
+self-hosted-runner:
+  labels:
+    - hulk
