@@ -8,7 +8,7 @@ REPO="$TMP/repo"; DEPLOY="$TMP/deploy"; mkdir -p "$REPO" "$DEPLOY"
 
 cd "$REPO"; git init -q; git config user.email t@t; git config user.name t
 mkdir -p proposals renderer tools
-for f in server.py uploads_handler.py shares.py requirements.txt Dockerfile \
+for f in server.py uploads_handler.py shares.py doctypes.py requirements.txt Dockerfile \
          Dockerfile.renderer tools/render_pdf.py renderer/worker.py \
          docker-compose.yml README.md proposals/doc.html; do echo a > "$f"; done
 git add -A; git commit -qm base
@@ -46,5 +46,8 @@ out="$(plan "$P")"; assert_has "마커만 갱신" "$out"; n=$((n+1))
 # 8) 코드+콘텐츠 동시 → 둘 다
 P="$H"; echo c > server.py; echo c > proposals/doc.html; H=$(commit_change m)
 out="$(plan "$P")"; assert_has "viewer=1 renderer=0 proposals=1 compose=1" "$out"; n=$((n+1))
+# 9) doctypes.py 단독 → 뷰어 재빌드 (이미지에 COPY 되는 소스. 이슈 #4 회귀)
+P="$H"; echo b > doctypes.py; H=$(commit_change t)
+out="$(plan "$P")"; assert_has "viewer=1 renderer=0 proposals=0 compose=1" "$out"; n=$((n+1))
 
 echo "OK — $n 시나리오 통과"

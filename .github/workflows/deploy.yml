@@ -2,8 +2,12 @@ name: daily-deploy
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # 08:00 UTC = 17:00 KST (지연 허용)
-  workflow_dispatch:       # 수동 실행 / 롤백 / 테스트
+    # GitHub 은 매시 정각에 schedule 이벤트가 몰려 지연되거나 아예 폐기(drop)한다.
+    # 그래서 정각을 피하고, 폐기에 대비해 하루 두 번 예약한다.
+    # deploy.sh 는 .deployed_sha 마커 기반 멱등이라 이미 반영된 커밋이면 즉시 skip 한다.
+    - cron: '23 8 * * *'    # 17:23 KST — 1차
+    - cron: '23 10 * * *'   # 19:23 KST — 1차가 폐기됐을 때의 백스톱
+  workflow_dispatch:        # 수동 실행 / 롤백 / 테스트
 
 # 동시 실행 방지(겹치면 앞선 실행을 기다림, 취소하지 않음).
 concurrency:
