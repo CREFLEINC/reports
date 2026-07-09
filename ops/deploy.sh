@@ -90,9 +90,14 @@ if [ "$BUILD_VIEWER$BUILD_RENDERER$SYNC_PROPOSALS$COMPOSE_UP" = "0000" ]; then
 fi
 
 # ── 3. 테스트 게이트 (python:3.12-slim) ────────────────────────────
-log "pytest (python:3.12-slim 컨테이너)…"
-run docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$GITHUB_WORKSPACE":/w -w /w python:3.12-slim \
-  bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && pytest -q"
+# 워크스페이스는 반드시 :ro 로 마운트한다. 컨테이너는 root 로 도는데, 쓰기 마운트면 pytest 의
+# .pytest_cache/ 와 테스트가 만드는 uploads/ 가 root 소유로 워크스페이스에 남는다. 러너(hulk)는
+# 그걸 지우지 못해 다음 실행의 `git clean -ffdx` 가 EACCES 로 죽는다 — 배포가 자기 자신을
+# 벽돌로 만든다. 그래서 /src:ro 를 컨테이너 레이어(/w)로 복사해 격리하고, 흔적은 --rm 으로 버린다.
+# (tests/test_deploy_classification.py 가 이 마운트 계약을 강제)
+log "pytest (python:3.12-slim 컨테이너, 워크스페이스 read-only)…"
+run docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$GITHUB_WORKSPACE":/src:ro -w /w python:3.12-slim \
+  bash -c "cp -a /src/. /w/ && pip install -q -r requirements.txt -r requirements-dev.txt && pytest -q"
 
 # ── 4. 콘텐츠 동기화 ───────────────────────────────────────────────
 if [ "$SYNC_PROPOSALS" = "1" ]; then
