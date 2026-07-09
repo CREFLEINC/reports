@@ -73,7 +73,9 @@ BUILD_VIEWER=0; BUILD_RENDERER=0; SYNC_PROPOSALS=0; COMPOSE_UP=0
 if [ "$FULL" = "1" ]; then
   BUILD_VIEWER=1; BUILD_RENDERER=1; SYNC_PROPOSALS=1; COMPOSE_UP=1
 else
-  if matches '^(server\.py|uploads_handler\.py|shares\.py|requirements\.txt|Dockerfile)$'; then BUILD_VIEWER=1; COMPOSE_UP=1; fi
+  # 뷰어 이미지에 COPY 되는 소스 전부. 누락 시 재빌드 없이 마커만 전진한다
+  # (tests/test_deploy_classification.py 가 Dockerfile 의 COPY 목록과 대조해 강제).
+  if matches '^(server\.py|uploads_handler\.py|shares\.py|doctypes\.py|requirements\.txt|Dockerfile)$'; then BUILD_VIEWER=1; COMPOSE_UP=1; fi
   if matches '^(Dockerfile\.renderer|tools/render_pdf\.py|renderer/worker\.py)$'; then BUILD_RENDERER=1; COMPOSE_UP=1; fi
   if matches '^docker-compose\.yml$'; then COMPOSE_UP=1; fi
   if matches '^proposals/'; then SYNC_PROPOSALS=1; fi

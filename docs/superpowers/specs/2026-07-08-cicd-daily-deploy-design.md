@@ -118,6 +118,10 @@ image: ${REGISTRY:-hub.crefle.com}/service/reporter-renderer:${RENDERER_TAG:-1.1
   포크/PR의 신뢰불가 코드가 self-hosted 러너에서 실행될 위험 원천 차단. (repo도 private)
 - 러너는 **systemd 서비스**로 상시 기동(17:00 온라인 보장, 재부팅 자동 복구).
 
+> **정정(2026-07-09)**: 이 저장소는 현재 **public** 이다 — 위 괄호 안 "repo도 private" 전제는 사실이
+> 아니다. 다만 주 방어선인 *트리거 제한*(push·PR 없음, workflow_dispatch 는 write 권한 필요)은
+> 그대로 유효하므로 포크 PR 코드가 self-hosted 러너에서 실행될 위험은 여전히 차단된다.
+
 ## 10. 러너 설치 (hulk, 1회)
 
 ```bash
@@ -160,3 +164,26 @@ sudo ./svc.sh install hulk && sudo ./svc.sh start   # systemd 상시화
 - 배포 후 `docker compose ps`(Up healthy)·`/healthz` 200·신규 라우트 응답 확인.
 - 헬스 실패를 의도적으로 유발(잘못된 태그)해 자동 롤백 동작 확인.
 - `.deployed_sha`가 성공 시에만 갱신되는지 확인.
+
+## 14. 개정 이력
+
+### 2026-07-09 — 첫 예약 실행 실패 대응 (이슈 #4)
+
+최초 예약 실행일(07-09 08:00 UTC)에 `schedule` 런이 **생성조차 되지 않았다**(`event=schedule` 0건).
+그 결과 07-08 23:34 UTC 에 병합된 `3644195`(PR #7)가 운영에 반영되지 않았다.
+
+| # | 원인 | 조치 |
+|---|------|------|
+| RC-1 | cron `0 8 * * *` 이 **정각** — GitHub 은 정시 부하로 schedule 이벤트를 지연·폐기한다 | 정각 회피 + 백스톱 이중화: `23 8`(17:23 KST), `23 10`(19:23 KST). 마커 멱등이라 중복 무해 |
+| RC-2 | `doctypes.py` 가 `Dockerfile` 에 COPY 되는데 `deploy.sh` 의 `BUILD_VIEWER` 패턴에 없음 | 패턴에 추가 + `tests/test_deploy_classification.py` 가 COPY 목록과 패턴을 대조해 강제 |
+| RC-3 | 러너가 `run.sh` 포그라운드 프로세스로 기동(§9 의 systemd 요구 미이행) | `sudo ./svc.sh install hulk && sudo ./svc.sh start` (hulk 작업, 별건) |
+
+**§12 의 오판 정정** — "Dockerfile COPY 누락 트랩: 헬스체크+자동 롤백이 안전망"은 절반만 맞다.
+Dockerfile 쪽 누락은 import 크래시 → 헬스체크가 잡는다. 그러나 **`deploy.sh` 분류 패턴 쪽 누락**은
+재빌드 자체가 일어나지 않아 기존 컨테이너가 그대로 healthy 를 유지한 채 마커만 전진한다.
+헬스체크는 이 경우를 절대 잡지 못하고, 이후 실행에서도 자가 복구되지 않는다. 그래서 안전망을
+런타임(헬스체크)이 아니라 **배포 전 테스트 게이트**로 옮겼다.
+
+**남은 리스크(수용)**: 알림은 "잡이 실행된 뒤 실패" 시에만 발송된다. 두 예약이 모두 폐기되면
+잡이 없으므로 알림도 없다(무성 실패). GitHub cron 에 의존하는 한 GitHub cron 의 부재를 감지할 수
+없다 — 감지하려면 hulk systemd timer 등 사외 의존 없는 트리거가 필요하다(미채택).
