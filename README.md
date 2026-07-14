@@ -226,6 +226,28 @@ python tools/render_pdf.py <html>           # 단일 문서
 
 **보안/범위(M1)**: 업로드 HTML 은 활성 콘텐츠다. nosniff·CSP(`connect-src 'none'` 등)·격리 렌더러·감사 로그(`uploads/audit.log`)를 적용하되, **공유 자격증명·동일 출처**라는 구조적 위험이 남는다 → **LAN 전용** 전제. 실사용자 인증(Google OAuth)은 M2, 공개 노출 시 별도 출처·TLS 는 M3 (그 전에는 공개 프록시 금지).
 
+## 문서 등록 API (이슈 #14)
+
+`POST /api/v1/documents` — 웹 UI(`/upload`)와 **동일한 처리**(`uploads_handler.handle_upload`)를 RESTful API로
+노출한다. 자동화·외부 연동에서 HTML 보고서를 올릴 때 쓴다. content-type 은 multipart/form-data 이고 쓰기
+자격증명(`REPORTS_UPLOAD_USER/PASS`)이 필요하다(`/upload` 와 동일 인증). 필드도 `/upload` 와 동일:
+`doc_type`(영문 슬러그) · `name` · `version` · `file`(.html 또는 .zip) · `overwrite`(옵션, 기본 0).
+
+성공 시 **`201 Created`** + `Location: <href>` 헤더 + JSON `{status, href, pdf_pending, type, name, version}`
+(뒤 3개는 서버가 정규화한 값 에코). 오류는 핸들러 그대로 상속: 중복(overwrite 미지정) → 409 · 허용 안 된
+확장자 → 415 · 크기 초과 → 413 · 미인증 → 401. zip-slip·zip-bomb·탐색기 메타데이터 정리도 동일 적용.
+
+```bash
+# 단일 HTML
+curl -u uploader:비밀번호 -X POST http://localhost:8000/api/v1/documents \
+  -F doc_type=demo -F name=my-report -F version=1 -F file=@report.html
+# 자산 포함 묶음(index.html 포함 zip)
+curl -u uploader:비밀번호 -X POST http://localhost:8000/api/v1/documents \
+  -F doc_type=demo -F name=my-report -F version=2 -F file=@bundle.zip
+```
+
+라우트·테스트: `server.py`(`POST /upload` 과 핸들러 공유) · `tests/test_uploads.py`.
+
 ## 문서 유형 관리 (이슈 #6)
 
 업로드 문서 유형(`uploads/docs/<슬러그>/` 폴더)을 uploader 가 직접 추가·이름변경·삭제한다. 예전에는 유형이
