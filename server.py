@@ -10,6 +10,7 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     GET  /            보관 문서 목차 페이지 (요청마다 두 루트를 스캔해 동적 생성)
     GET  /upload      업로드 폼 (쓰기 자격증명 필요)
     POST /upload      업로드 처리: 검증 → 원자적 게시 → 렌더 작업 enqueue
+    POST /api/v1/documents   문서 등록 API: POST /upload 과 동일 계약(핸들러 재사용) · 201 + Location
     GET  /login       로그인 폼 (무인증)
     POST /login       자격증명 검증 → JWT 쿠키 발급
     POST /logout      JWT 쿠키 삭제(로그아웃)
@@ -1080,6 +1081,40 @@ async def upload(
         overwrite=bool(overwrite),
     )
     return JSONResponse(result, status_code=201)
+
+
+@app.post("/api/v1/documents")
+async def api_v1_documents_create(
+    request: Request,
+    doc_type: str = Form(...),
+    name: str = Form(...),
+    version: str = Form(...),
+    file: UploadFile = File(...),
+    overwrite: int = Form(0),
+    uploader: str = Depends(require_uploader),
+) -> JSONResponse:
+    """문서 등록 API — GUI POST /upload 와 동일 계약을 handle_upload() 로 재사용하는 얇은 래퍼.
+
+    성공 시 201 + 핸들러 반환(status·href·pdf_pending)에 정규화된 type·name·version 을 에코하고
+    응답 헤더 Location=href 를 붙인다. 정규화 값은 핸들러가 내부에서 쓰는 것과 동일한 헬퍼로
+    재계산한다(로직 복제/핸들러 수정 아님). 입력 검증·보안·게시는 모두 핸들러가 수행한다."""
+    client_ip = request.client.host if request.client else "?"
+    result = await uploads_handler.handle_upload(
+        file=file,
+        doc_type=doc_type,
+        name=name,
+        version=version,
+        client_ip=client_ip,
+        uploader=uploader,
+        overwrite=bool(overwrite),
+    )
+    payload = {
+        **result,
+        "type": uploads_handler._safe_type(doc_type),
+        "name": uploads_handler._safe_name(name),
+        "version": uploads_handler._safe_version(version),
+    }
+    return JSONResponse(payload, status_code=201, headers={"Location": result["href"]})
 
 
 @app.get("/login")

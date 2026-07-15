@@ -213,3 +213,120 @@ def test_upload_macos_finder_zip_publishes(tmp_path, cleanup_published):
     assert (dest / "assets" / "style.css").is_file()
     assert not (dest / "__MACOSX").exists()
     assert not (dest / ".DS_Store").exists()
+
+
+# ── e2e: POST /api/v1/documents (핸들러 재사용 API 래퍼) ─────────────────────
+def _uploader_client() -> TestClient:
+    """uploader JWT 쿠키를 실은 TestClient (기존 e2e 테스트와 동일 인증 방식)."""
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("uploader", "uploader"))
+    return c
+
+
+@pytest.fixture
+def cleanup_api_docs():
+    """API e2e 정리: apitest 유형 폴더 전체 + 이 테스트가 만든 렌더 큐 잡 제거."""
+    type_dir = server.UPLOADS_DOCS / "apitest"
+    before = set(uh.QUEUE_DIR.glob("*.json")) if uh.QUEUE_DIR.is_dir() else set()
+    yield type_dir
+    import shutil
+    shutil.rmtree(type_dir, ignore_errors=True)
+    if uh.QUEUE_DIR.is_dir():
+        for j in set(uh.QUEUE_DIR.glob("*.json")) - before:
+            j.unlink(missing_ok=True)
+
+
+def test_api_documents_html_publishes(cleanup_api_docs):
+    # 단일 .html → 201, 핸들러 반환 + 정규화 type/name/version 에코 + Location 헤더, 디스크 게시.
+    type_dir = cleanup_api_docs
+    c = _uploader_client()
+    r = c.post(
+        "/api/v1/documents",
+        data={"doc_type": "apitest", "name": "apidoc", "version": "1"},
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "published"
+    assert body["pdf_pending"] is True
+    assert body["href"] == "/uploads/docs/apitest/apidoc_v1/index.html"
+    assert body["type"] == "apitest"
+    assert body["name"] == "apidoc"
+    assert body["version"] == "1"
+    assert r.headers["location"] == body["href"]
+    assert (type_dir / "apidoc_v1" / "index.html").is_file()
+
+
+def test_api_documents_zip_publishes(tmp_path, cleanup_api_docs):
+    # .zip(HTML + 자산) → 201, index.html + 자산 게시.
+    type_dir = cleanup_api_docs
+    z = _make_zip(tmp_path / "u.zip", {"index.html": HTML, "assets/style.css": b"body{}"})
+    c = _uploader_client()
+    with z.open("rb") as fh:
+        r = c.post(
+            "/api/v1/documents",
+            data={"doc_type": "apitest", "name": "apizip", "version": "2"},
+            files={"file": ("bundle.zip", fh, "application/zip")},
+        )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "published"
+    assert body["href"] == "/uploads/docs/apitest/apizip_v2/index.html"
+    assert r.headers["location"] == body["href"]
+    assert (type_dir / "apizip_v2" / "index.html").is_file()
+    assert (type_dir / "apizip_v2" / "assets" / "style.css").is_file()
+
+
+def test_api_documents_normalizes_echo(cleanup_api_docs):
+    # 핸들러 내부 정규화와 동일하게 라우트가 type/name/version 을 정규화해 에코한다.
+    c = _uploader_client()
+    r = c.post(
+        "/api/v1/documents",
+        data={"doc_type": "APITEST", "name": "  My Doc ", "version": "v3"},
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["type"] == "apitest"
+    assert body["name"] == "My_Doc"
+    assert body["version"] == "3"
+    assert body["href"] == "/uploads/docs/apitest/My_Doc_v3/index.html"
+    assert r.headers["location"] == body["href"]
+
+
+def test_api_documents_duplicate_and_overwrite(cleanup_api_docs):
+    # 중복(overwrite 미지정) → 409, overwrite=1 → 재게시 201 (핸들러 상속 동작 + overwrite 필드).
+    c = _uploader_client()
+    fields = {"doc_type": "apitest", "name": "apidup", "version": "1"}
+    r1 = c.post("/api/v1/documents", data=fields,
+                files={"file": ("report.html", HTML, "text/html")})
+    assert r1.status_code == 201, r1.text
+    r2 = c.post("/api/v1/documents", data=fields,
+                files={"file": ("report.html", HTML, "text/html")})
+    assert r2.status_code == 409, r2.text
+    r3 = c.post("/api/v1/documents", data={**fields, "overwrite": "1"},
+                files={"file": ("report.html", HTML, "text/html")})
+    assert r3.status_code == 201, r3.text
+
+
+def test_api_documents_bad_extension_415():
+    # 허용 안 된 확장자 → 415 (핸들러 상속). 게시물 없음 → 정리 불필요.
+    c = _uploader_client()
+    r = c.post(
+        "/api/v1/documents",
+        data={"doc_type": "apitest", "name": "apibad", "version": "1"},
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert r.status_code == 415, r.text
+
+
+def test_api_documents_unauthenticated_401():
+    # 인증 없이(require_uploader) → 401.
+    c = TestClient(app)
+    r = c.post(
+        "/api/v1/documents",
+        headers={"accept": "application/json"},
+        data={"doc_type": "apitest", "name": "apidoc", "version": "1"},
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert r.status_code == 401, r.text
