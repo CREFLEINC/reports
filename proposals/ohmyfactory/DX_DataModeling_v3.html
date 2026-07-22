@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DX Sheet-Based DB Table Design (v3)</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --panel: #ffffff;
+      --ink: #17202a;
+      --sub: #697386;
+      --line: #d7dde5;
+      --soft: #f8fafc;
+      --blue: #2563eb;
+      --green: #0f766e;
+      --orange: #b45309;
+      --violet: #7c3aed;
+      --red: #b91c1c;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    header {
+      padding: 24px 28px 18px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: 0; }
+    .subtitle { margin: 0; color: var(--sub); font-size: 14px; }
+
+    .changelog {
+      margin: 16px 0 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+      padding: 14px 16px;
+    }
+    .changelog summary { cursor: pointer; font-weight: 700; font-size: 14px; color: #1d4ed8; }
+    .changelog .cl-body { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .changelog h4 { margin: 0 0 6px; font-size: 13px; }
+    .changelog ul { margin: 0; padding-left: 18px; }
+    .changelog li { font-size: 12.5px; color: #334155; margin-bottom: 4px; }
+    .changelog .review { border-left: 3px solid var(--orange); padding-left: 12px; }
+    .changelog .review h4 { color: var(--orange); }
+    @media (max-width: 900px) { .changelog .cl-body { grid-template-columns: 1fr; } }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px minmax(560px, 1fr) 340px;
+      gap: 14px;
+      padding: 14px;
+      align-items: start;
+    }
+
+    aside, .content, .detail {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    aside {
+      position: sticky;
+      top: 14px;
+      padding: 14px;
+      max-height: calc(100vh - 28px);
+      overflow: auto;
+    }
+
+    .side-title {
+      margin: 4px 4px 12px;
+      color: var(--sub);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .sheet-list { display: flex; flex-direction: column; gap: 7px; }
+
+    button.sheet-btn {
+      width: 100%;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button.sheet-btn:hover { border-color: var(--blue); }
+    button.sheet-btn.active { background: #eff6ff; border-color: var(--blue); color: #1d4ed8; font-weight: 700; }
+
+    .content { min-height: 780px; padding: 20px; }
+
+    .sheet-head {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sheet-head h2 { margin: 0 0 6px; font-size: 22px; }
+    .sheet-head p { margin: 0; color: var(--sub); font-size: 14px; }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: var(--sub);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .flow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+    .flow-card { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+    .flow-card strong { display: block; margin-bottom: 7px; font-size: 13px; }
+    .flow-card span { display: block; color: var(--sub); font-size: 12px; }
+
+    .mini-diagram { margin: 14px 0 18px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; }
+
+    .diagram-lanes {
+      display: grid;
+      grid-template-columns: minmax(170px, 0.8fr) minmax(220px, 1fr) minmax(220px, 1.2fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .diagram-lane { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .lane-name { color: var(--sub); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+
+    .diagram-node { position: relative; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .diagram-node strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+    .diagram-node span { display: block; margin-top: 4px; color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+    .diagram-node.sheet { border-color: var(--orange); background: #fff7ed; }
+    .diagram-node.work { border-color: var(--blue); background: #eff6ff; }
+    .diagram-node.ref { border-color: var(--green); background: #ecfdf5; }
+
+    .diagram-arrow { display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 12px; min-height: 32px; }
+    .diagram-arrow::before { content: ""; flex: 1; height: 1px; background: var(--line); margin-right: 6px; }
+    .diagram-arrow::after { content: ">"; font-weight: 700; }
+
+    .section-title { margin: 22px 0 10px; font-size: 16px; }
+    .section-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 22px 0 10px; }
+    .section-row .section-title { margin: 0; }
+
+    .param-legend { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+    .legend-item { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--sub); font-size: 11px; white-space: nowrap; }
+    .legend-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; }
+    .legend-dot.pk { background: var(--orange); }
+    .legend-dot.fk { background: var(--blue); }
+    .legend-dot.enum { background: var(--violet); }
+    .legend-dot.file { background: var(--green); }
+
+    .table-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+
+    .entity-card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+    .entity-head { display: flex; justify-content: space-between; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--line); background: #fbfcfe; }
+    .entity-head strong { font-size: 14px; }
+    .entity-type { color: var(--sub); font-size: 12px; white-space: nowrap; }
+    .fields { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px; }
+
+    .param {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      padding: 6px 9px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      max-width: 100%;
+    }
+
+    .param:hover { border-color: var(--blue); color: var(--blue); }
+    .param.active { border-color: var(--blue); background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+    .param.pk { border-color: var(--orange); background: #fff7ed; }
+    .param.fk { border-color: var(--blue); background: #eff6ff; }
+    .param.enum { border-color: var(--violet); background: #f5f3ff; }
+    .param.file { border-color: var(--green); background: #ecfdf5; }
+    .param.new { box-shadow: 0 0 0 2px #fca5a5; }
+
+    .refs { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+    .ref-card { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .ref-card strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .ref-card span { color: var(--sub); font-size: 12px; }
+
+    .detail { position: sticky; top: 14px; padding: 16px; min-height: auto; max-height: calc(100vh - 28px); overflow: auto; }
+    .detail h2 { margin: 0 0 8px; font-size: 17px; overflow-wrap: anywhere; }
+    .detail .hint { color: var(--sub); font-size: 13px; margin: 0 0 16px; }
+
+    .detail-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+    .summary-box { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+    .summary-box small { display: block; margin-bottom: 5px; color: var(--sub); font-size: 11px; font-weight: 700; }
+    .summary-box strong, .summary-box code { display: block; font-size: 12px; overflow-wrap: anywhere; }
+
+    .detail-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+    .detail-table th, .detail-table td { padding: 8px 0; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .detail-table th { width: 86px; color: var(--sub); font-size: 11px; }
+
+    .badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; background: #eef2f7; color: #334155; font-size: 12px; margin-right: 5px; margin-bottom: 5px; }
+    .type-text { background: #f1f5f9; }
+    .type-number { background: #ecfdf5; color: #0f766e; }
+    .type-date { background: #fff7ed; color: #9a3412; }
+    .type-enum { background: #f5f3ff; color: #6d28d9; }
+    .type-fk { background: #eff6ff; color: #1d4ed8; }
+    .type-file { background: #ecfeff; color: #0e7490; }
+
+    .matrix { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .matrix th, .matrix td { padding: 10px 12px; border-bottom: 1px solid #edf0f3; text-align: left; vertical-align: top; }
+    .matrix th { background: #fbfcfe; color: var(--sub); font-size: 12px; }
+    .matrix tr:last-child td { border-bottom: 0; }
+
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+    .ihint { margin: 0 0 10px; color: var(--sub); font-size: 12.5px; }
+    .vchips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
+    .vchip { border: 1px solid #c4b5fd; background: #f5f3ff; color: #5b21b6; border-radius: 999px; padding: 6px 10px; font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 220px minmax(0, 1fr); }
+      .detail { grid-column: 1 / -1; position: static; max-height: none; }
+    }
+
+    @media (max-width: 760px) {
+      header { padding: 20px 16px; }
+      .layout { display: block; padding: 12px; }
+      aside, .content, .detail { position: static; margin-bottom: 12px; }
+      .flow { grid-template-columns: 1fr; }
+      .diagram-lanes { grid-template-columns: 1fr; }
+      .diagram-arrow { justify-content: flex-start; }
+      .diagram-arrow::before { display: none; }
+      .diagram-arrow::after { content: "↓"; }
+      .sheet-head { display: block; }
+      .pill-row { justify-content: flex-start; margin-top: 12px; }
+      .section-row { display: block; }
+      .param-legend { justify-content: flex-start; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DX DB 테이블 설계 - 시트별 검토 화면 <span style="color:var(--blue)">v3</span></h1>
+    <p class="subtitle">v3 · 2026-07-22 · 공통 7 + 마스터 8 + 업무 18 = 33테이블. enum은 시트별 관리, 결재는 approval 단독, 검사 가이드/테이블 변경이력 각 1개.</p>
+
+    <details class="changelog" open>
+      <summary>v2 → v3 변경 요약 · 검토 포인트 (펼침/접힘)</summary>
+      <div class="cl-body">
+        <div>
+          <h4>반영한 변경 (단순화)</h4>
+          <ul>
+            <li><b>enum 시트별 유지</b>: 중앙 <code>enum_set</code>/<code>enum_value</code> 는 두지 않음. <code>check_item.option_values</code> 로 항목별 선택값 관리, 상태·판정·구분 필드는 시트 enum(코드값)으로 저장</li>
+            <li><b>검사 가이드 1테이블</b>: <code>sheet_guide</code>(시트별 가이드 내용 + 이미지 첨부). 업무 테이블의 <code>sheet_guide_id</code> 는 제거, 시트 단위로 참조</li>
+            <li><b>결재는 approval 단독</b>: <code>document_type</code>·<code>approval_route</code> 없이 기존 <code>approval</code>(다형 참조)로 처리. 결재 유무는 결재행 존재로 판단</li>
+            <li><b>테이블 변경이력</b>: <code>table_change_log</code>(전 테이블 변경 전/후값·시점 기록). 호기명 변경 등 과거 기록의 시점 보존용</li>
+            <li><b>MES 실적 수신 제외</b>: 별도 수신 테이블·<code>source_type_id</code> 없음. 생산실적은 수기 입력 기준</li>
+            <li><b>용어 통일</b>: 대표 업무일자 → <code>record_date</code></li>
+            <li><code>check_result</code>: v2의 <code>user_id</code> 제거(<code>created_by</code> 일원화)</li>
+            <li>07 사출조건 <code>tonnage</code> 제거 · 03 참고자료 <code>item_name</code>+<code>is_used</code> 롱포맷 · 30 <code>resin_name</code>/<code>grade</code>→material 연동 · 18 참가자 서명 구조화</li>
+          </ul>
+        </div>
+        <div class="review">
+          <h4>검토(확인) 포인트</h4>
+          <ul>
+            <li>테이블 변경 시점 보존: <code>table_change_log</code>(변경로그) 방식. 완전한 시점조회가 필요하면 SCD Type2(유효기간)로 전환 — <b>고객 확인 대상</b></li>
+            <li>17 재검사 <code>good_qty_after</code>·<code>defect_rate</code> 는 <b>파생(자동산출)</b> 표기. 저장 대신 조회 계산 권장</li>
+            <li>시트 enum(주야·판정 등)은 코드값을 시트별로 관리 — 여러 시트 공유가 잦아지면 공통화 재검토</li>
+            <li>붉은 테두리 칩 = v3 신규/변경 필드</li>
+          </ul>
+        </div>
+      </div>
+    </details>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="side-title">Sheet List</div>
+      <div id="sheetList" class="sheet-list"></div>
+    </aside>
+
+    <main class="content">
+      <div id="sheetView"></div>
+    </main>
+
+    <section class="detail" aria-live="polite">
+      <h2 id="detailTitle">파라미터 상세</h2>
+      <p id="detailHint" class="hint">왼쪽 시트에서 파라미터를 누르면 타입과 사용 상황을 확인할 수 있다.</p>
+      <div id="detailBody"></div>
+    </section>
+  </div>
+
+  <script>
+    const masters = {
+      unit: { name: "단위", purpose: "T, sec, %, ℃ 등 단위 기준정보" },
+      attachment: { name: "첨부", purpose: "이미지, 파일, 서명/도장 이미지 관리" },
+      approval: { name: "결재", purpose: "결재자·승인상태·결재첨부 관리 (다형 참조, 결재 유무 = 결재행 존재)" },
+      sheet_guide: { name: "검사 가이드", purpose: "시트별 검사 가이드 내용·이미지 관리" },
+      check_item: { name: "점검/측정 항목", purpose: "점검 기준, 입력 타입, 판정 규칙, 시트 선택값 관리" },
+      check_result: { name: "점검/측정 결과", purpose: "점검 결과 값을 공통 구조로 저장" },
+      table_change_log: { name: "테이블 변경이력", purpose: "전 테이블 변경 전/후값·시점 기록" },
+      machine: { name: "사출기/호기", purpose: "현장 호기 기준정보" },
+      model: { name: "차종/모델", purpose: "차종 또는 프로젝트 기준정보" },
+      product: { name: "품목/제품", purpose: "생산 품목 기준정보" },
+      worker: { name: "작업자", purpose: "작성자, 검사자, 측정자, 결재자 기준정보" },
+      mold: { name: "금형", purpose: "금형 번호와 차수 기준정보" },
+      material: { name: "원재료", purpose: "원재료 코드, 등급, 유형 기준정보" },
+      equipment: { name: "부대설비/검사장비", purpose: "건조기, 제습기, 호퍼, JIG 등 설비 기준정보" },
+      standard_item: { name: "표준 항목", purpose: "불량유형, 수리항목, 검사 항목 등 기준정보" }
+    };
+
+    // v3 신규/변경 필드 (붉은 테두리로 강조)
+    const newFields = new Set([
+      "table_change_log_id", "target_table", "target_record_id", "changed_field", "before_value", "after_value", "changed_by", "changed_at",
+      "record_date", "item_name", "is_used", "result_value"
+    ]);
+
+    const tablePrimaryKeys = {
+      nonconforming_reinspection_record: "reinspection_record_id"
+    };
+
+    const foreignKeyTargets = {
+      unit_id: "unit.unit_id",
+      tonnage_unit_id: "unit.unit_id",
+      temp_unit_id: "unit.unit_id",
+      dry_temp_unit_id: "unit.unit_id",
+      moisture_unit_id: "unit.unit_id",
+      attachment_id: "attachment.attachment_id",
+      approval_attachment_id: "attachment.attachment_id",
+      signature_attachment_id: "attachment.attachment_id",
+      check_item_id: "check_item.check_item_id",
+      approver_id: "worker.worker_id",
+      created_by: "worker.worker_id",
+      changed_by: "worker.worker_id",
+      user_id: "worker.worker_id",
+      worker_id: "worker.worker_id",
+      inspector_id: "worker.worker_id",
+      manager_id: "worker.worker_id",
+      author_id: "worker.worker_id",
+      primary_worker_id: "worker.worker_id",
+      secondary_worker_id: "worker.worker_id",
+      measurer_id: "worker.worker_id",
+      machine_id: "machine.machine_id",
+      model_id: "model.model_id",
+      product_id: "product.product_id",
+      mold_id: "mold.mold_id",
+      material_id: "material.material_id",
+      equipment_id: "equipment.equipment_id",
+      dryer_equipment_id: "equipment.equipment_id",
+      standard_item_id: "standard_item.standard_item_id",
+      production_record_id: "production_record.production_record_id",
+      mold_repair_request_id: "mold_repair_request.mold_repair_request_id",
+      training_report_id: "training_report.training_report_id"
+    };
+
+    // 시트별 enum (중앙 테이블 없이 코드값을 시트/항목 단위로 관리)
+    const localOptionKeys = {
+      shift_id: "shift",
+      judgement_id: "judgement",
+      inspection_stage: "inspection_stage",
+      final_judgement: "judgement",
+      initial_product_check_id: "initial_product_check",
+      machine_group_id: "machine_group",
+      machine_status_id: "machine_status",
+      machine_type_id: "machine_type",
+      mold_status_id: "mold_status",
+      material_type_id: "material_type",
+      equipment_type: "equipment_type",
+      repair_cost_type_id: "repair_cost_type",
+      satisfaction_id: "satisfaction",
+      manager_check: "check_status",
+      result_value: "ox_result",
+      option_values: "시트별 선택값"
+    };
+
+    const polymorphicKeys = new Set([
+      "source_record_type", "source_record_id",
+      "approval_target_type", "approval_target_id",
+      "target_table", "target_record_id"
+    ]);
+
+    const sheets = [
+      {
+        id: "common",
+        title: "공통 엔티티",
+        summary: "여러 시트에서 반복 사용되는 단위, 첨부, 결재, 검사 가이드, 점검 기준/결과, 테이블 변경이력",
+        raw: "전체 시트 공통",
+        output: "공통 테이블 7종",
+        refs: [],
+        tables: [
+          ["unit", "공통", ["unit_id", "unit_code", "unit_name", "unit_symbol", "unit_category", "is_active"]],
+          ["attachment", "공통", ["attachment_id", "file_name", "file_type", "mime_type", "file_url", "file_size", "uploaded_by", "uploaded_at"]],
+          ["approval", "공통", ["approval_id", "approval_target_type", "approval_target_id", "approval_role", "approver_id", "approval_status", "approved_at", "approval_attachment_id"]],
+          ["sheet_guide", "공통", ["sheet_guide_id", "sheet_id", "guide_content", "attachment_id", "is_active"]],
+          ["check_item", "공통", ["check_item_id", "check_group", "check_name", "check_spec", "input_type", "unit_id", "option_values", "spec_value", "upper_tolerance", "lower_tolerance", "judgement_rule", "sort_order", "is_active"]],
+          ["check_result", "공통", ["check_result_id", "check_item_id", "source_record_type", "source_record_id", "created_at", "created_by", "input_value", "attachment_id", "judgement_value", "remarks"]],
+          ["table_change_log", "공통", ["table_change_log_id", "target_table", "target_record_id", "changed_field", "before_value", "after_value", "changed_by", "changed_at"]]
+        ]
+      },
+      {
+        id: "master",
+        title: "마스터 엔티티",
+        summary: "사출기, 모델, 품목, 작업자, 금형, 원재료, 설비, 표준항목 기준정보 (상태·구분은 시트 enum 코드값)",
+        raw: "16_Master 관리대장 및 각 시트 기준정보",
+        output: "마스터 테이블 8종",
+        refs: ["unit"],
+        tables: [
+          ["machine", "마스터", ["machine_id", "machine_group_id", "machine_no", "machine_status_id", "machine_type_id", "tonnage_value", "tonnage_unit_id", "location", "is_active"]],
+          ["model", "마스터", ["model_id", "model_code", "model_name", "is_active"]],
+          ["product", "마스터", ["product_id", "product_no", "product_code", "product_name", "model_id", "is_active"]],
+          ["worker", "마스터", ["worker_id", "worker_no", "worker_name", "department_name", "position", "is_active"]],
+          ["mold", "마스터", ["mold_id", "mold_no", "mold_name", "mold_revision_no", "model_id", "product_id", "shot_count", "mold_status_id", "is_active"]],
+          ["material", "마스터", ["material_id", "material_code", "material_name", "material_grade", "material_type_id", "is_active"]],
+          ["equipment", "마스터", ["equipment_id", "equipment_no", "equipment_name", "equipment_type", "machine_id", "location", "is_active"]],
+          ["standard_item", "마스터", ["standard_item_id", "item_group_key", "item_code", "item_name", "is_active"]]
+        ]
+      },
+      {
+        id: "sheet01",
+        title: "01 생산실적 입력",
+        summary: "일자/근무구분/호기/품목별 생산 계획·실적·유형별 불량 저장 (수기 입력 기준)",
+        raw: "날짜, 구분, 호기, 상태, 생산 모델, C/T, 계획, 실적, 불량유형",
+        output: "production_record + production_defect",
+        refs: ["machine", "product", "model", "standard_item"],
+        tables: [
+          ["production_record", "업무", ["production_record_id", "record_date", "shift_id", "machine_id", "machine_status_id", "product_id", "model_id", "cycle_time_sec", "planned_qty", "actual_qty", "remarks"]],
+          ["production_defect", "업무", ["production_defect_id", "production_record_id", "standard_item_id", "defect_qty"]]
+        ]
+      },
+      {
+        id: "sheet02",
+        title: "02 초중종물 체크시트",
+        summary: "주/야 × 초물·중물1·중물2·종물 매트릭스 합부판정. 판정 O(양호)/X(사용불가)//(해당없음), 중량은 측정값. 초물=금형Setting 후·종물=LOT 마지막. 불량 시 생산관리 Feedback. 검사항목은 check_item 가변.",
+        raw: "설비호기, 품목, 작성자, 차수, 모델명, 생산일자, 주/야, 초중종물 단계, 검사항목별 O/X//, 중량",
+        output: "imf_check + check_result",
+        refs: ["machine", "product", "model", "mold", "worker", "check_item", "check_result"],
+        inputs: ["검사항목별 판정 O(양호)/X(사용불가)///(해당없음)", "중량 number (측정값 기록)", "외관·치수·미성형·게이트 등 항목은 check_item 가변"],
+        tables: [
+          ["imf_check", "업무", ["imf_check_id", "record_date", "shift_id", "machine_id", "product_id", "model_id", "mold_id", "worker_id", "inspection_stage", "final_judgement", "remarks"]]
+        ]
+      },
+      {
+        id: "sheet03",
+        title: "03 금형수리 의뢰서",
+        summary: "금형 수리 의뢰·일정·비용·수리내용·항목 O/X 결과와 참고자료 저장. 결재 사용",
+        raw: "금형번호, 모델/품명, 차수, 관리번호, Shot, 발생일, 의뢰일, 요청일, 완료일, 수리내용, 참고자료",
+        output: "mold_repair_request + item + attachment + approval",
+        refs: ["mold", "product", "model", "standard_item", "worker", "approval", "attachment"],
+        tables: [
+          ["mold_repair_request", "업무", ["mold_repair_request_id", "user_id", "mold_id", "product_id", "model_id", "control_no", "production_count", "prev_shot", "current_shot", "occurred_at", "requested_at", "due_at", "completed_at", "repair_cost_type_id", "mass_production_site", "request_text", "repair_text", "satisfaction_id", "remarks"]],
+          ["mold_repair_request_item", "업무", ["mold_repair_request_item_id", "mold_repair_request_id", "standard_item_id", "result_value"]],
+          ["mold_repair_request_attachment", "업무", ["mold_repair_request_attachment_id", "mold_repair_request_id", "item_name", "is_used", "attachment_id"]]
+        ]
+      },
+      {
+        id: "sheet05",
+        title: "05 사출설비 점검표",
+        summary: "월별 호기 사출설비 일상점검. 정상 O / 비정상 X, 노즐온도는 실제값 기록 후 판정. 점검기준은 check_item, 결과는 check_result. 작성/검토/승인 결재.",
+        raw: "구분, No, 점검항목, 점검기준, 일자별(1~31) 결과",
+        output: "equipment_check_record + check_result + approval",
+        refs: ["machine", "equipment", "worker", "check_item", "check_result", "approval"],
+        inputs: ["작동유 온도 · 기준 45±5℃", "노즐 온도 · 셋팅값 ±5℃(육안)", "금형온도 · 셋팅값 ±3℃ 초과시 알람", "경보등-온수기 · 셋팅값 ±3℃ 초과시 알람", "경보등-사출기 · 이상시 작동유무 O/X"],
+        tables: [["equipment_check_record", "업무", ["equipment_check_record_id", "record_month", "machine_id", "equipment_id", "worker_id", "remarks"]]]
+      },
+      {
+        id: "sheet07",
+        title: "07 사출조건 점검",
+        summary: "사출 조건 측정. 항목별 SPEC·공차·Upper·Lower 기준은 check_item, 측정값이 Upper~Lower 벗어나면 자동 NG. 톤수는 호기 기준정보로 대체(컬럼 제거).",
+        raw: "모델, 품명, 원재료, 설비, 항목별 SPEC/공차/Upper/Lower + 측정값",
+        output: "injection_condition_record + check_result",
+        refs: ["machine", "product", "model", "material", "check_item", "check_result"],
+        inputs: ["Cycle Time · SPEC 90 ±5s (85~95)", "노즐 온도 · 280 ±5℃ (275~285)", "실린더 H1 · 290 ±5℃", "실린더 H2 · 290 ±5℃", "실린더 H3 · 280 ±5℃", "사출압력·보압·속도 등 항목별 SPEC 동일 구조"],
+        tables: [["injection_condition_record", "업무", ["injection_condition_record_id", "record_date", "machine_id", "product_id", "model_id", "material_id", "remarks"]]]
+      },
+      {
+        id: "sheet08",
+        title: "08 공정 패트롤",
+        summary: "순회점검 하이브리드 — 외관 6항목 이상무/이상유(가변, check_item) + 호퍼온도 실제값(℃)+판정 + 초기품 확인 OK/NG. 이상유·NG 시 문제점/조치. 담당/확인/승인 결재. 패트롤시각 11/14/17/19(주)·23/02/05/07(야).",
+        raw: "날짜, 주/야, 품명, 패트롤시각, 호기, 외관 6항목 이상유무, 호퍼온도(℃), 초기품 확인, 판정, 검사자, 문제점/조치",
+        output: "process_patrol_record + check_result + approval",
+        refs: ["product", "machine", "worker", "unit", "check_item", "check_result", "approval"],
+        inputs: ["외관: Core파손·인서트천공·밀핀파손·후크/리브 미성형·후크/리브 꺼임·Gate돌출 → 이상무/이상유", "호퍼온도 실제값(℃) + 판정 OK/NG", "초기품 확인 OK/NG"],
+        tables: [["process_patrol_record", "업무", ["process_patrol_record_id", "record_date", "shift_id", "patrol_time", "product_id", "machine_id", "temp_value", "temp_unit_id", "initial_product_check_id", "judgement_id", "inspector_id", "issue_action", "remarks"]]]
+      },
+      {
+        id: "sheet10",
+        title: "10 온습도 관리",
+        summary: "온습도 일일 측정·판정 저장. 관리기준(온도 0~35℃·습도 10~80%)은 check_item, 측정값·판정은 check_result. 매 주/야 시작 전 담당자 기록, 매월 결재(정/부).",
+        raw: "일자, 온도(℃), 습도(%), 판정, 문제점, 조치사항, 담당",
+        output: "environment_check_record + check_result + approval",
+        refs: ["worker", "check_item", "check_result", "approval"],
+        inputs: ["온도(℃) · 기준 0~35 · within_range 자동판정", "습도(%) · 기준 10~80 · within_range 자동판정"],
+        tables: [["environment_check_record", "업무", ["environment_check_record_id", "record_date", "worker_id", "issue_action", "remarks"]]]
+      },
+      {
+        id: "sheet11",
+        title: "11 냉각수 온도추이",
+        summary: "냉각수 IN/OUT 온도를 주·야로 측정. 기준 25±3℃(22~28℃), 범위 이탈 시 자동 NG. 온도 단위 ℃는 check_item.unit_id, 측정값·판정은 check_result. 작성/검토/승인 결재.",
+        raw: "일자, 주/야, IN(측정℃·판정·확인), OUT(측정℃·판정·확인)",
+        output: "cooling_water_check_record + check_result + approval",
+        refs: ["worker", "unit", "check_item", "check_result", "approval"],
+        inputs: ["IN 온도(℃) · 기준 25±3 (22~28) · within_range 자동판정", "OUT 온도(℃) · 기준 25±3 (22~28) · within_range 자동판정"],
+        tables: [["cooling_water_check_record", "업무", ["cooling_water_check_record_id", "record_date", "shift_id", "author_id", "remarks"]]]
+      },
+      {
+        id: "sheet15",
+        title: "15 지그 관리대장",
+        summary: "JIG 마스터대장(적용제품 16종) × 주간 점검 매트릭스. 상태 양호=O/이상=X(변형·파손), 매주 월요일 08시 육안확인. 점검자·관리자 서명.",
+        raw: "대장월, No, 적용제품, 점검일자(주간), Jig상태-변형, Jig상태-파손, 비고, 점검자/관리자 서명",
+        output: "jig_check_record + check_result",
+        refs: ["equipment", "product", "worker", "check_item", "check_result"],
+        inputs: ["Jig 상태-변형 O(양호)/X(이상)", "Jig 상태-파손 O(양호)/X(이상)"],
+        tables: [["jig_check_record", "업무", ["jig_check_record_id", "record_date", "equipment_id", "product_id", "inspector_id", "manager_id", "remarks"]]]
+      },
+      {
+        id: "sheet17",
+        title: "17 부적합품 재검사 대장",
+        summary: "부적합품 재작업 범위, 불량/양품 수량, 재작업 내용·시간 저장 (양품수·불량률은 파생 산출)",
+        raw: "작업일, 품목, 모델, LOT, 재작업범위, 불량수, 양품수, 불량률",
+        output: "nonconforming_reinspection_record",
+        refs: ["product", "model"],
+        tables: [["nonconforming_reinspection_record", "업무", ["reinspection_record_id", "record_date", "product_id", "model_id", "lot_no", "rework_scope_qty", "defect_qty", "good_qty_after", "defect_rate", "rework_desc", "rework_process", "rework_manpower", "rework_minutes", "remarks"]]]
+      },
+      {
+        id: "sheet18",
+        title: "18 교육 훈련 보고서",
+        summary: "교육 일자, 제목, 장소, 시간, 교육 내용 저장. 참석자·서명은 별도 구조화",
+        raw: "교육일자, 교육명, 교육시간, 장소, 참석자, 교육내용",
+        output: "training_report + training_report_attendee",
+        refs: ["attachment"],
+        tables: [
+          ["training_report", "업무", ["training_report_id", "record_date", "instructor_org", "education_title", "education_duration", "education_place", "education_content", "remarks"]],
+          ["training_report_attendee", "업무", ["training_report_attendee_id", "training_report_id", "attendee_name", "signature_attachment_id"]]
+        ]
+      },
+      {
+        id: "sheet28",
+        title: "28 원재료 수분측정",
+        summary: "원재료 수분 측정. 기준 수분값 0.03% 이하(초과 시 자동 NG), 1회/1일. 건조온도(℃)·수분값(%)은 컬럼 저장, 판정은 기준 대비 자동. 작성/검토/승인 결재.",
+        raw: "측정일, 원재료, LOT, 건조기, 건조온도(℃), 수분값(%), 판정, SPEC OVER 조치, 측정자, 호기",
+        output: "material_moisture_record + approval",
+        refs: ["material", "equipment", "machine", "unit", "worker", "approval"],
+        tables: [["material_moisture_record", "업무", ["material_moisture_record_id", "record_date", "material_id", "material_lot_no", "dryer_equipment_id", "machine_id", "dry_temp", "dry_temp_unit_id", "moisture_value", "moisture_unit_id", "judgement_id", "issue_action", "measurer_id", "remarks"]]]
+      },
+      {
+        id: "sheet29",
+        title: "29 제습기 점검표",
+        summary: "제습기 설비점검. 기준 건조온도 205±5℃, 필터청소 주1회(목)·필터교환 6개월/1회. 기준은 check_item, 결과는 check_result. 작성/검토/승인 결재.",
+        raw: "구분, SPEC, 항목(설정값·실제값·점검자·점검시간·관리자점검), 일자별(1~31)",
+        output: "dehumidifier_check_record + check_result + approval",
+        refs: ["equipment", "worker", "check_item", "check_result", "sheet_guide", "approval"],
+        inputs: ["건조온도 설정값(℃) · 기준 205±5", "건조온도 실제값(℃) · 205±5 within_range", "필터청소 주1회(목) O/X", "필터교환 6개월/1회 확인", "관리자 점검(매주 금) O/X"],
+        tables: [["dehumidifier_check_record", "업무", ["dehumidifier_check_record_id", "record_date", "equipment_id", "hopper_name", "inspector_id", "check_time", "manager_check", "remarks"]]]
+      },
+      {
+        id: "sheet30",
+        title: "30 원재료 호퍼 점검표",
+        summary: "원재료 호퍼 설비점검. 기준 건조온도 80±5℃, 필터청소 주1회(목)·보조호퍼 자석 이물제거 주1회. 수지명·등급은 material 연동. 작성/검토/승인 결재.",
+        raw: "구분, SPEC, 항목(설정값·실제값·Controller상태·작동유무·점검자), 일자별(1~31)",
+        output: "hopper_check_record + check_result + approval",
+        refs: ["machine", "equipment", "material", "worker", "check_item", "check_result", "sheet_guide", "approval"],
+        inputs: ["건조온도 설정값(℃) · 기준 80±5", "건조온도 실제값(℃) · 80±5 within_range", "온도 Controller 상태 O/X", "작동유무 상태확인 O/X", "필터청소 주1회(목) O/X", "자석 이물제거 주1회 O/X"],
+        tables: [["hopper_check_record", "업무", ["hopper_check_record_id", "record_date", "machine_id", "equipment_id", "material_id", "inspector_id", "check_time", "manager_check", "remarks"]]]
+      }
+    ];
+
+    const labels = {
+      unit_id: "단위 ID", unit_code: "단위 코드", unit_name: "단위명", unit_symbol: "단위 기호", unit_category: "단위 분류",
+      attachment_id: "첨부 ID", file_name: "파일명", file_type: "파일 유형", mime_type: "MIME 타입", file_url: "파일 URL", file_size: "파일 크기", uploaded_by: "업로드자", uploaded_at: "업로드 일시",
+      approval_id: "결재 ID", approval_target_type: "결재 대상 유형(업무 테이블)", approval_target_id: "결재 대상 ID", approval_role: "결재 역할", approver_id: "결재자", approval_status: "결재 상태", approved_at: "결재 일시", approval_attachment_id: "결재 첨부(서명/도장)",
+      sheet_guide_id: "검사 가이드 ID", sheet_id: "시트 ID(양식 식별)", guide_title: "가이드 제목", guide_content: "가이드 내용",
+      check_item_id: "점검항목 ID", check_group: "점검 그룹/업무", check_name: "점검명", check_spec: "점검 기준", input_type: "입력 타입(enum/number/text/date/time/image/file)", option_values: "시트별 선택값", spec_value: "기준값", upper_tolerance: "상한 허용오차", lower_tolerance: "하한 허용오차", judgement_rule: "판정 규칙(manual/within_range 등)",
+      check_result_id: "점검결과 ID", source_record_type: "연결 업무 테이블(다형)", source_record_id: "연결 업무 기록 ID(다형)", created_at: "저장 일시", created_by: "저장 사용자", input_value: "입력값", judgement_value: "판정값(시트 코드)",
+      table_change_log_id: "테이블 변경이력 ID", target_table: "대상 테이블", target_record_id: "대상 레코드 ID", changed_field: "변경 필드", before_value: "변경 전 값", after_value: "변경 후 값", changed_by: "변경자", changed_at: "변경 일시",
+      sort_order: "정렬순서", is_active: "사용여부", remarks: "비고",
+      machine_id: "호기", machine_group_id: "호기 그룹(시트 enum)", machine_no: "호기 번호/식별값", machine_status_id: "호기 상태(시트 enum)", machine_type_id: "호기 유형(시트 enum)", tonnage_value: "톤수", tonnage_unit_id: "톤수 단위", location: "위치",
+      model_id: "모델", model_code: "모델 코드", model_name: "모델명",
+      product_id: "품목", product_no: "품번", product_code: "품목 코드", product_name: "품명",
+      worker_id: "작업자", worker_no: "사번", worker_name: "작업자명", department_name: "부서명", position: "직책",
+      mold_id: "금형", mold_no: "금형 번호", mold_name: "금형명", mold_revision_no: "금형 차수", shot_count: "Shot 수", mold_status_id: "금형 상태(시트 enum)",
+      material_id: "원재료", material_code: "원재료 코드", material_name: "원재료명", material_grade: "원재료 등급", material_type_id: "원재료 유형(시트 enum)", material_lot_no: "원재료 LOT",
+      equipment_id: "설비/장비", equipment_no: "설비 번호", equipment_name: "설비명", equipment_type: "설비 유형(시트 enum)",
+      standard_item_id: "표준 항목", item_group_key: "항목 그룹 키", item_code: "항목 코드", item_name: "항목명",
+      production_record_id: "생산실적 ID", record_date: "기록일자(통일 용어)", shift_id: "근무구분(시트 enum)", cycle_time_sec: "사이클타임", planned_qty: "계획수량", actual_qty: "실적수량",
+      production_defect_id: "생산불량 ID", defect_qty: "불량수량",
+      imf_check_id: "초중종물 검사 ID", inspection_stage: "초중종물 구분(값: 초물/중물1/중물2/종물)", final_judgement: "최종 종합판정(값: OK/NG)",
+      mold_repair_request_id: "금형수리의뢰 ID", control_no: "관리번호", production_count: "Shot 카운트(생산 수)", prev_shot: "전 Shot", current_shot: "현 Shot", occurred_at: "발생일", requested_at: "의뢰일", due_at: "요청일", completed_at: "완료일", repair_cost_type_id: "수리비용 구분(시트 enum)", mass_production_site: "양산처", request_text: "요청사항(의뢰 부서)", repair_text: "수리내용(금형 부서)", satisfaction_id: "만족도(시트 enum)",
+      mold_repair_request_item_id: "수리의뢰항목 ID", result_value: "O/X// 결과값(시트 enum)", mold_repair_request_attachment_id: "참고자료 ID", is_used: "사용/해당 여부", user_id: "작성자",
+      equipment_check_record_id: "설비점검 ID", record_month: "기록월",
+      injection_condition_record_id: "사출조건점검 ID",
+      process_patrol_record_id: "공정패트롤 ID", patrol_time: "순회시간", temp_value: "실제 온도값", temp_unit_id: "온도 단위", initial_product_check_id: "초기품 확인(시트 enum)", inspector_id: "검사자", judgement_id: "판정(시트 enum)", issue_action: "이슈 및 조치사항",
+      environment_check_record_id: "온습도관리 ID", primary_worker_id: "1차 확인자", secondary_worker_id: "2차 확인자",
+      cooling_water_check_record_id: "냉각수온도 ID", author_id: "작성자",
+      jig_check_record_id: "지그점검 ID", manager_id: "관리자",
+      reinspection_record_id: "재검사 ID", lot_no: "LOT 번호", rework_scope_qty: "재작업 범위수량", good_qty_after: "재작업 후 양품수(파생)", defect_rate: "불량률(파생)", rework_desc: "재작업 내용", rework_process: "재작업 공정", rework_manpower: "재작업 인원", rework_minutes: "재작업 시간",
+      training_report_id: "교육보고서 ID", instructor_org: "교육 주관/강사", education_title: "교육명", education_duration: "교육시간", education_place: "교육장소", education_content: "교육내용", training_report_attendee_id: "교육 참석자 ID", attendee_name: "참석자명", signature_attachment_id: "참석자 서명 첨부",
+      material_moisture_record_id: "수분측정 ID", dryer_equipment_id: "건조설비", dry_temp: "건조온도", dry_temp_unit_id: "건조온도 단위", moisture_value: "수분 측정값", moisture_unit_id: "수분 단위", measurer_id: "측정자",
+      dehumidifier_check_record_id: "제습기점검 ID", hopper_name: "호퍼명", check_time: "점검시간", manager_check: "관리자 확인(시트 enum)",
+      hopper_check_record_id: "호퍼점검 ID"
+    };
+
+    const examples = {
+      unit_id: "u_01", unit_code: "T, sec, %, ℃, mm, kgf", unit_name: "톤, 초, 퍼센트, 섭씨", unit_symbol: "T, s, %, ℃", unit_category: "weight_force, time, ratio, temperature, length, pressure", is_active: "true / false",
+      attachment_id: "att_0001", file_name: "burr_photo.jpg", file_type: "image, document", mime_type: "image/jpeg, application/pdf", file_url: "/files/2026/07/att_0001.jpg", file_size: "204800 (bytes)", uploaded_by: "w_0007", uploaded_at: "2026-07-22T09:15:00+09:00",
+      approval_id: "ap_0001", approval_target_type: "mold_repair_request, process_patrol_record", approval_target_id: "mrr_0001", approval_role: "반장, 관리자, 부서장", approver_id: "w_0003", approval_status: "상신, 승인, 반려, 회송", approved_at: "2026-07-22T11:30:00+09:00", approval_attachment_id: "att_0002 (서명/도장)",
+      sheet_guide_id: "sg_01", sheet_id: "hopper_check, dehumidifier_check", guide_content: "호퍼 청소 상태 육안 확인 후 촬영",
+      check_item_id: "ci_001", check_group: "imf_check, process_patrol", check_name: "Burr 없을 것, 냉각수 온도, 수분율", check_spec: "치수 10.0±0.2mm 이내", input_type: "enum, number, text, date, time, datetime, image, file", option_values: "OK/NG, O/X, 양호/미흡", spec_value: "10.0, 60, 0.05", upper_tolerance: "0.2", lower_tolerance: "-0.2", judgement_rule: "within_range, less_than_or_equal, manual", sort_order: "1, 2, 3",
+      check_result_id: "cr_0001", source_record_type: "imf_check, process_patrol_record", source_record_id: "imf_0001", created_at: "2026-07-22T09:20:00+09:00", created_by: "w_0007", input_value: "O, X, OK, NG, 0.05, 11:00", judgement_value: "OK, NG, 양호", remarks: "특이사항 없음",
+      table_change_log_id: "tcl_0001", target_table: "machine, mold", target_record_id: "m_0015", changed_field: "machine_no, machine_status_id", before_value: "15", after_value: "28", changed_by: "w_0002", changed_at: "2026-07-22T14:00:00+09:00",
+      machine_id: "m_0015", machine_group_id: "일반, 소형, K4", machine_no: "3, 5, 15, 28", machine_status_id: "가동, 비가동, 보전중", machine_type_id: "사출기", tonnage_value: "200, 450, 1300", tonnage_unit_id: "u_01 (T)", location: "1공장 A라인",
+      model_id: "mo_001", model_code: "MDL-001", model_name: "SANTA FE",
+      product_id: "p_0007", product_no: "P-10023", product_code: "FC-001", product_name: "FRONT COVER, TOP COVER",
+      worker_id: "w_0007", worker_no: "S2101", worker_name: "홍길동", department_name: "제조그룹, 금형부서, 의뢰부서", position: "작업자, 반장, 담당, 부서장, 관리자",
+      mold_id: "md_0003", mold_no: "M-2201", mold_name: "FRONT COVER 금형", mold_revision_no: "1, 2, 3 (차수)", shot_count: "152000", mold_status_id: "사용중, 수리중, 폐기",
+      material_id: "mt_002", material_code: "PP-1023", material_name: "PP(폴리프로필렌)", material_grade: "A, B", material_type_id: "원료, 재생", material_lot_no: "LOT-PP-0715",
+      equipment_id: "eq_0004", equipment_no: "DRY-02", equipment_name: "제습건조기 2호", equipment_type: "건조기, 제습기, 호퍼, JIG",
+      standard_item_id: "si_012", item_group_key: "defect_type, repair_request_type, inspection_item", item_code: "DFT-05", item_name: "가스, 치수, 외관, Burr 없을 것",
+      production_record_id: "pr_0001", record_date: "2026-07-22T08:00:00+09:00", shift_id: "주간, 야간", cycle_time_sec: "23.5", planned_qty: "4800", actual_qty: "4750", production_defect_id: "pd_0001", defect_qty: "12",
+      imf_check_id: "imf_0001", inspection_stage: "초물, 중물1, 중물2, 종물", final_judgement: "OK, NG",
+      mold_repair_request_id: "mrr_0001", user_id: "w_0007", control_no: "MR-2026-013", production_count: "152000", prev_shot: "150000", current_shot: "152000", occurred_at: "2026-07-20T08:00:00+09:00", requested_at: "2026-07-20T09:00:00+09:00", due_at: "2026-07-22T18:00:00+09:00", completed_at: "2026-07-22T15:00:00+09:00", repair_cost_type_id: "유상, 무상", mass_production_site: "1공장", request_text: "게이트 버 발생, 수정 요청", repair_text: "게이트 연마 및 냉각수 구멍 청소", satisfaction_id: "상, 중, 하",
+      mold_repair_request_item_id: "mri_0001", result_value: "O, X, /", mold_repair_request_attachment_id: "mra_0001", item_name_attach: "최종품, 측정표, 조건표", is_used: "true / false",
+      equipment_check_record_id: "ecr_0001", record_month: "2026-07",
+      injection_condition_record_id: "icr_0001",
+      process_patrol_record_id: "ppr_0001", patrol_time: "2026-07-22T11:00:00+09:00", temp_value: "45.2", temp_unit_id: "u_04 (℃)", initial_product_check_id: "OK, NG", judgement_id: "이상, 이상무 / OK, NG", inspector_id: "w_0005", issue_action: "온도 이상 → 설정 재조정",
+      environment_check_record_id: "envr_0001", primary_worker_id: "w_0005", secondary_worker_id: "w_0006",
+      cooling_water_check_record_id: "cwr_0001", author_id: "w_0007",
+      jig_check_record_id: "jcr_0001", manager_id: "w_0003",
+      reinspection_record_id: "rir_0001", lot_no: "LOT-20260722-01", rework_scope_qty: "500", defect_qty2: "20", good_qty_after: "480 (파생)", defect_rate: "4.0 (파생)", rework_desc: "게이트 버 제거", rework_process: "후가공", rework_manpower: "2", rework_minutes: "90",
+      training_report_id: "tr_0001", instructor_org: "품질보증팀", education_title: "초중종물 검사 표준 교육", education_duration: "2 (시간)", education_place: "1공장 회의실", education_content: "검사 기준 및 판정 방법", training_report_attendee_id: "tra_0001", attendee_name: "김철수", signature_attachment_id: "att_0010 (서명)",
+      material_moisture_record_id: "mmr_0001", dryer_equipment_id: "eq_0004", dry_temp: "80", dry_temp_unit_id: "u_04 (℃)", moisture_value: "0.05", moisture_unit_id: "u_03 (%)", measurer_id: "w_0007",
+      dehumidifier_check_record_id: "dcr_0001", hopper_name: "1호 호퍼", check_time: "2026-07-22T09:00:00+09:00", manager_check: "확인, 미확인",
+      hopper_check_record_id: "hcr_0001"
+    };
+
+    function exampleFor(table, field) {
+      if (field === "item_name" && table === "mold_repair_request_attachment") return examples.item_name_attach;
+      if (field === "item_name") return examples.item_name;
+      if (field === "defect_qty" && table === "nonconforming_reinspection_record") return examples.defect_qty2;
+      return examples[field] || "";
+    }
+
+    function dataType(field) {
+      if (field === "input_type" || field === "judgement_rule") return "text";
+      if (field === "is_used" || field === "is_active") return "boolean";
+      if (localOptionKeys[field]) return "enum input";
+      if (field === "input_value") return "text / value";
+      if (field.endsWith("_id") || field.endsWith("_by")) return "FK";
+      if (field.includes("date") || field.includes("Date") || field === "record_month" || field.endsWith("_at") || field.endsWith("_time")) return "datetime";
+      if (field === "cycle_time_sec" || field.includes("duration") || field.includes("minutes")) return "number";
+      if (field.includes("qty") || field.includes("count") || field.includes("shot") || field.includes("rate") || field.includes("value") || field.includes("temp") || field.includes("tonnage")) return "number";
+      if (field.includes("attachment") || field.includes("file")) return "file reference";
+      return "text";
+    }
+
+    function keyKind(table, field) {
+      if (table && (field === `${table}_id` || tablePrimaryKeys[table] === field)) return "PK";
+      if (polymorphicKeys.has(field)) return "polymorphic reference";
+      if (foreignKeyTargets[field]) return "FK";
+      if (localOptionKeys[field]) return "sheet enum";
+      return "normal column";
+    }
+
+    function referenceTarget(field) {
+      if (foreignKeyTargets[field]) return foreignKeyTargets[field];
+      if (localOptionKeys[field]) return "시트별 선택값 데이터셋";
+      if (field === "source_record_type" || field === "source_record_id") return "source_record_type 값에 따라 여러 업무 기록 테이블 참조";
+      if (field === "approval_target_type" || field === "approval_target_id") return "approval_target_type 값에 따라 결재 대상 업무 테이블 참조";
+      if (field === "target_table" || field === "target_record_id") return "target_table 값에 따라 대상 테이블 참조";
+      return "없음";
+    }
+
+    function usage(table, field) {
+      if (field === "target_table" || field === "target_record_id") return "어떤 테이블의 어떤 레코드가 변경됐는지 가리키는 다형 참조. 호기명 변경 등 과거 기록의 시점 맥락 보존에 사용.";
+      if (field === "changed_field" || field === "before_value" || field === "after_value") return "변경 대상 필드와 전/후 값을 기록한다.";
+      if (field === "created_at" || field === "changed_at") return "시스템이 자동 기록하는 일시다.";
+      if (field === "created_by" || field === "changed_by") return "시스템이 자동 기록하는 처리 사용자다.";
+      if (field === "sheet_id") return "이 가이드가 어떤 시트(양식)에 대한 것인지 식별한다.";
+      if (field === "option_values") return "공통 enum 테이블 대신 해당 시트/항목에서 사용할 선택값 목록을 관리한다.";
+      if (field === "input_value") return "사용자가 실제로 입력하거나 선택한 값. 예: O, X, OK, NG, 0.05, 11:00, 비고 내용.";
+      if (field === "judgement_value") return "점검/측정 결과의 판정값. 시트별 선택값 기준으로 저장한다.";
+      if (field === "result_value") return "수리/검사 항목의 O/X/해당없음 결과를 시트 선택값으로 저장한다.";
+      if (field === "is_used") return "참고자료 항목의 사용/해당 여부를 표시한다(이름 + 사용유무 롱포맷).";
+      if (field === "good_qty_after") return "재작업 범위수량 - 불량수량으로 자동 산출되는 파생값. 저장보다 조회 계산을 권장한다.";
+      if (field === "defect_rate") return "불량수량 / 재작업 범위수량 * 100 으로 자동 산출되는 파생값.";
+      if (localOptionKeys[field]) return "중앙 enum 테이블 없이, 정해진 시트별 선택값(코드)을 값으로 직접 저장·수신한다. 예: 초물/중물/종물, OK/NG.";
+      if (field.endsWith("_id")) {
+        if (field === `${table}_id`) return "해당 테이블의 고유 식별자로 사용한다.";
+        if (field.includes("record") || field.includes("request") || field.includes("report")) return "상위 업무 기록과 하위 상세 데이터를 연결할 때 사용한다.";
+        return "마스터 또는 공통 테이블을 참조해 중복 입력을 줄일 때 사용한다.";
+      }
+      if (polymorphicKeys.has(field)) return "대상 유형/ID로 여러 테이블 중 하나를 가리키는 다형 참조 필드다.";
+      if (field.includes("date") || field.includes("_at")) return "업무 발생일·작성일·점검일 등 시간 흐름을 추적할 때 사용한다.";
+      if (field.includes("qty") || field.includes("count")) return "수량 집계, 실적 계산, 불량률 산출에 사용한다.";
+      if (field.includes("remarks")) return "정형 필드로 표현하기 어려운 보충 설명을 저장한다.";
+      if (field.includes("attachment") || field.includes("file")) return "사진, 서명, 도장, 파일 등 업로드 자료를 연결한다.";
+      return "시트의 원본 입력값 또는 화면 표시/검색에 필요한 업무 속성으로 사용한다.";
+    }
+
+    function chipClass(table, field) {
+      const kind = keyKind(table, field);
+      let base = "";
+      if (kind === "PK") base = "pk";
+      else if (kind === "FK") base = "fk";
+      else if (kind === "sheet enum") base = "enum";
+      else if (dataType(field).includes("file")) base = "file";
+      if (newFields.has(field)) base += " new";
+      return base.trim();
+    }
+
+    function typeClass(type) {
+      if (type.includes("enum") || type.includes("boolean")) return "type-enum";
+      if (type.includes("FK")) return "type-fk";
+      if (type.includes("number")) return "type-number";
+      if (type.includes("date") || type.includes("time")) return "type-date";
+      if (type.includes("file")) return "type-file";
+      return "type-text";
+    }
+
+    const sheetList = document.getElementById("sheetList");
+    const sheetView = document.getElementById("sheetView");
+    const detailTitle = document.getElementById("detailTitle");
+    const detailHint = document.getElementById("detailHint");
+    const detailBody = document.getElementById("detailBody");
+    let selectedSheet = sheets[0];
+    let selectedParam = null;
+
+    function renderSheetList() {
+      sheetList.innerHTML = "";
+      sheets.forEach(sheet => {
+        const button = document.createElement("button");
+        button.className = `sheet-btn${sheet.id === selectedSheet.id ? " active" : ""}`;
+        button.textContent = sheet.title;
+        button.addEventListener("click", () => {
+          selectedSheet = sheet;
+          selectedParam = null;
+          render();
+        });
+        sheetList.appendChild(button);
+      });
+    }
+
+    function renderParam(table, field) {
+      const button = document.createElement("button");
+      button.className = `param ${chipClass(table, field)}${selectedParam && selectedParam.table === table && selectedParam.field === field ? " active" : ""}`;
+      button.textContent = field;
+      const ex = exampleFor(table, field);
+      button.title = (labels[field] || field) + (ex ? ` · 예시: ${ex}` : "");
+      button.addEventListener("click", () => {
+        selectedParam = { table, field };
+        updateParamSelection();
+        renderDetail();
+      });
+      return button;
+    }
+
+    function renderMiniDiagram(sheet) {
+      const workNodes = sheet.tables.map(([table, category, fields]) => `
+        <div class="diagram-node work">
+          <strong>${table}</strong>
+          <span>${category} · ${fields.length} parameters</span>
+        </div>
+      `).join("");
+
+      const refNodes = sheet.refs.length
+        ? sheet.refs.map(ref => `
+          <div class="diagram-node ref">
+            <strong>${ref}</strong>
+            <span>${masters[ref]?.name || "참조 테이블"} · ${masters[ref]?.purpose || ""}</span>
+          </div>
+        `).join("")
+        : `<div class="diagram-node ref"><strong>직접 참조 없음</strong><span>공통 엔티티/보고성 테이블 중심</span></div>`;
+
+      return `
+        <div class="mini-diagram">
+          <div class="diagram-lanes">
+            <div class="diagram-lane">
+              <div class="lane-name">원본 시트</div>
+              <div class="diagram-node sheet">
+                <strong>${sheet.title}</strong>
+                <span>${sheet.raw}</span>
+              </div>
+            </div>
+            <div class="diagram-lane">
+              <div class="lane-name">저장 업무 테이블</div>
+              <div class="diagram-arrow" aria-hidden="true"></div>
+              ${workNodes}
+            </div>
+            <div class="diagram-lane">
+              <div class="lane-name">참조 공통/마스터</div>
+              <div class="diagram-arrow" aria-hidden="true"></div>
+              ${refNodes}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateParamSelection() {
+      document.querySelectorAll(".param").forEach(button => button.classList.remove("active"));
+      if (!selectedParam) return;
+      document.querySelectorAll(".param").forEach(button => {
+        if (button.textContent === selectedParam.field) {
+          const card = button.closest(".entity-card");
+          const title = card?.querySelector(".entity-head strong")?.textContent;
+          if (title === selectedParam.table) button.classList.add("active");
+        }
+      });
+    }
+
+    function renderSheet() {
+      const refs = selectedSheet.refs.map(ref => `<span class="pill">${ref} · ${masters[ref]?.name || ""}</span>`).join("");
+      sheetView.innerHTML = `
+        <div class="sheet-head">
+          <div>
+            <h2>${selectedSheet.title}</h2>
+            <p>${selectedSheet.summary}</p>
+          </div>
+          <div class="pill-row">
+            <span class="pill">${selectedSheet.tables.length} 업무/기준 테이블</span>
+            <span class="pill">${selectedSheet.refs.length} 참조 테이블</span>
+          </div>
+        </div>
+
+        <div class="flow">
+          <div class="flow-card"><strong>원본 시트 표현</strong><span>${selectedSheet.raw}</span></div>
+          <div class="flow-card"><strong>저장 테이블</strong><span>${selectedSheet.output}</span></div>
+          <div class="flow-card"><strong>공통 처리</strong><span>첨부·결재·검사 가이드·점검 결과는 공통 테이블 참조, 선택값은 시트별 enum(option_values)으로 관리</span></div>
+        </div>
+
+        <h3 class="section-title">시트별 관계 다이어그램</h3>
+        ${renderMiniDiagram(selectedSheet)}
+
+        <div class="section-row">
+          <h3 class="section-title">시트에서 생성/사용하는 테이블</h3>
+          <div class="param-legend" aria-label="파라미터 색상 범례">
+            <span class="legend-item"><i class="legend-dot pk"></i>PK</span>
+            <span class="legend-item"><i class="legend-dot fk"></i>FK</span>
+            <span class="legend-item"><i class="legend-dot enum"></i>시트 enum</span>
+            <span class="legend-item"><i class="legend-dot file"></i>첨부/파일</span>
+          </div>
+        </div>
+        <div id="tableGrid" class="table-grid"></div>
+
+        ${selectedSheet.inputs ? `
+        <div class="section-row"><h3 class="section-title">실제 입력 항목 (check_result 저장)</h3></div>
+        <p class="ihint">이 시트의 측정·판정 값은 항목별로 <code>check_result.input_value</code> / <code>judgement_value</code> 에 저장됩니다. 실제 항목은 <code>check_item</code> 마스터에서 관리되며 가변입니다 — 아래는 대표 예시.</p>
+        <div class="vchips">${selectedSheet.inputs.map(i => `<span class="vchip">${i}</span>`).join("")}</div>
+        ` : ""}
+
+        <h3 class="section-title">참조하는 공통/마스터</h3>
+        <div class="refs">${refs || '<div class="ref-card"><strong>직접 참조 없음</strong><span>단일 보고성 테이블로 관리</span></div>'}</div>
+
+        <h3 class="section-title">검토용 요약</h3>
+        <table class="matrix">
+          <thead><tr><th>확인 관점</th><th>내용</th></tr></thead>
+          <tbody>
+            <tr><td>원본 표현</td><td>${selectedSheet.raw}</td></tr>
+            <tr><td>정규화 결과</td><td>${selectedSheet.output}</td></tr>
+            <tr><td>참조 기준정보</td><td>${selectedSheet.refs.join(", ") || "없음"}</td></tr>
+          </tbody>
+        </table>
+      `;
+
+      const tableGrid = document.getElementById("tableGrid");
+      selectedSheet.tables.forEach(([table, category, fields]) => {
+        const card = document.createElement("article");
+        card.className = "entity-card";
+        card.innerHTML = `
+          <div class="entity-head">
+            <strong>${table}</strong>
+            <span class="entity-type">${category}</span>
+          </div>
+          <div class="fields"></div>
+        `;
+        const fieldsBox = card.querySelector(".fields");
+        fields.forEach(field => fieldsBox.appendChild(renderParam(table, field)));
+        tableGrid.appendChild(card);
+      });
+    }
+
+    function renderDetail() {
+      if (!selectedParam) {
+        detailTitle.textContent = "파라미터 상세";
+        detailHint.textContent = "왼쪽 시트에서 파라미터를 누르면 타입과 사용 상황을 확인할 수 있다.";
+        detailBody.innerHTML = `
+          <div class="detail-summary">
+            <div class="summary-box"><small>선택 전</small><strong>파라미터를 클릭</strong></div>
+            <div class="summary-box"><small>확인 가능</small><strong>타입 / 키 / 참조</strong></div>
+          </div>
+          <table class="detail-table">
+            <tr><th>보기 방식</th><td>시트별 저장 테이블을 먼저 보고 필요한 파라미터만 클릭한다.</td></tr>
+            <tr><th>색상</th><td><span class="badge">PK</span><span class="badge">FK</span><span class="badge">시트 enum</span><span class="badge">file</span></td></tr>
+            <tr><th>강조</th><td>붉은 테두리 칩 = v3 신규/변경 필드</td></tr>
+          </table>
+        `;
+        return;
+      }
+
+      const { table, field } = selectedParam;
+      const type = dataType(field);
+      const kind = keyKind(table, field);
+      const label = labels[field] || field;
+      detailTitle.textContent = field + (newFields.has(field) ? " · (v3)" : "");
+      detailHint.textContent = `${selectedSheet.title} · ${table}`;
+      detailBody.innerHTML = `
+        <div class="detail-summary">
+          <div class="summary-box"><small>한글명</small><strong>${label}</strong></div>
+          <div class="summary-box"><small>데이터 타입</small><strong><span class="badge ${typeClass(type)}">${type}</span></strong></div>
+          <div class="summary-box"><small>키 구분</small><strong><span class="badge">${kind}</span></strong></div>
+          <div class="summary-box"><small>v3 상태</small><code>${newFields.has(field) ? "신규/변경" : "유지"}</code></div>
+        </div>
+        <table class="detail-table">
+          <tr><th>예시</th><td><code>${exampleFor(table, field) || "—"}</code></td></tr>
+          <tr><th>참조 대상</th><td><code>${referenceTarget(field)}</code></td></tr>
+          <tr><th>소속 테이블</th><td><code>${table}</code></td></tr>
+          <tr><th>사용 상황</th><td>${usage(table, field)}</td></tr>
+          <tr><th>시트 맥락</th><td>${selectedSheet.summary}</td></tr>
+        </table>
+      `;
+    }
+
+    function render() {
+      renderSheetList();
+      renderSheet();
+      renderDetail();
+    }
+
+    render();
+  </script>
+</body>
+</html>
