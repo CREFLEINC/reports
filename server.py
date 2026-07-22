@@ -11,6 +11,7 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     GET  /upload      업로드 폼 (쓰기 자격증명 필요)
     POST /upload      업로드 처리: 검증 → 원자적 게시 → 렌더 작업 enqueue
     POST /api/v1/documents   문서 등록 API: POST /upload 과 동일 계약(핸들러 재사용) · 201 + Location
+    POST /api/v1/auth/token  토큰 발급 API: form 자격증명 → Bearer 용 JWT (access_token/token_type/expires_in)
     GET  /login       로그인 폼 (무인증)
     POST /login       자격증명 검증 → JWT 쿠키 발급
     POST /logout      JWT 쿠키 삭제(로그아웃)
@@ -26,6 +27,8 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
 require_uploader(uploader 역할). /s/* 공개 라우트는 무인증이며 토큰·비번·만료로만 접근을 제한한다.
 브라우저는 /login 으로 로그인해 JWT 쿠키를 받고 /logout 으로 비운다. Basic 헤더는 자동화(register_report.sh
 등 Sec-Fetch-* 없는 클라이언트)용 폴백이며, 브라우저 요청에선 무시된다(캐시된 Basic 이 로그아웃을 무력화 못 하게).
+REST API 클라이언트는 POST /api/v1/auth/token 으로 JWT 를 발급받아 Authorization: Bearer 헤더로 인증한다
+(Bearer 는 브라우저가 자발적으로 보내지 않으므로 Basic 과 달리 _is_browser 게이트 앞에서 인정한다).
 
 환경변수 (괄호는 기본값)
     REPORTS_USER / REPORTS_PASS            읽기 Basic Auth (crefle/crefle)
@@ -180,6 +183,14 @@ def _identify(request: Request) -> tuple[str, str] | None:
     token = request.cookies.get(COOKIE_NAME)
     if token:
         payload = _decode_token(token)
+        if payload and payload.get("role") in ("reader", "uploader"):
+            return str(payload.get("sub", "")), payload["role"]
+    # Bearer 토큰: REST API 클라이언트가 POST /api/v1/auth/token 으로 발급받은 JWT.
+    # 브라우저는 Bearer 를 자발적으로 보내지 않으므로(캐시된 Basic 자격증명 문제와 무관)
+    # _is_browser 게이트 앞에서 인정한다.
+    bearer = request.headers.get("Authorization", "")
+    if bearer.startswith("Bearer "):
+        payload = _decode_token(bearer[7:])
         if payload and payload.get("role") in ("reader", "uploader"):
             return str(payload.get("sub", "")), payload["role"]
     # Basic 헤더는 자동화(curl 등)에서만 인정한다. 브라우저(Sec-Fetch-* 존재)에서는 무시 —
@@ -1115,6 +1126,23 @@ async def api_v1_documents_create(
         "version": uploads_handler._safe_version(version),
     }
     return JSONResponse(payload, status_code=201, headers={"Location": result["href"]})
+
+
+@app.post("/api/v1/auth/token")
+def api_v1_auth_token(username: str = Form(...), password: str = Form(...)) -> JSONResponse:
+    """토큰 발급 API — form 자격증명(username/password) 검증 후 Bearer 용 JWT 발급.
+
+    성공 시 {"access_token": <JWT>, "token_type": "Bearer", "expires_in": TOKEN_TTL}.
+    토큰은 쿠키 세션과 동일한 _make_token(sub/role/iat/exp) 을 재사용한다(신규 클레임 없음).
+    자격증명 오류는 401 — 계정 존재 여부 힌트를 노출하지 않는다."""
+    role = _role_for_credentials(username, password)
+    if not role:
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+    return JSONResponse({
+        "access_token": _make_token(username, role),
+        "token_type": "Bearer",
+        "expires_in": TOKEN_TTL,
+    })
 
 
 @app.get("/login")

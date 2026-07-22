@@ -208,3 +208,60 @@ def test_browser_jwt_cookie_still_works():
     c.cookies.set("reports_token", server._make_token("reader", "reader"))
     r = c.get("/", headers=BROWSER)
     assert r.status_code == 200
+
+
+# ── 토큰 발급 API + Bearer 인증 (이슈 #19) ──────────────────────────────────
+def test_token_endpoint_issues_uploader_jwt():
+    # AC1: 유효 uploader 자격증명 → 200, access_token/token_type/expires_in, sub·role 복원 가능.
+    r = client.post("/api/v1/auth/token", data={"username": "uploader", "password": "uploaderpass"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["token_type"] == "Bearer"
+    assert body["expires_in"] == server.TOKEN_TTL
+    payload = server._decode_token(body["access_token"])
+    assert payload is not None
+    assert payload["sub"] == "uploader"
+    assert payload["role"] == "uploader"
+
+
+def test_token_endpoint_issues_reader_jwt():
+    # AC1: 유효 reader 자격증명 → 200, reader 역할 토큰.
+    r = client.post("/api/v1/auth/token", data={"username": "reader", "password": "readerpass"})
+    assert r.status_code == 200
+    payload = server._decode_token(r.json()["access_token"])
+    assert payload is not None
+    assert payload["sub"] == "reader"
+    assert payload["role"] == "reader"
+
+
+def test_token_endpoint_wrong_credentials_401():
+    # AC2: 잘못된 자격증명 → 401 + JSON detail, 토큰 미발급.
+    r = client.post("/api/v1/auth/token", data={"username": "reader", "password": "WRONG"})
+    assert r.status_code == 401
+    body = r.json()
+    assert "access_token" not in body
+    assert "detail" in body
+
+
+def test_bearer_token_grants_read():
+    # AC1/AC6: 발급 토큰을 Authorization: Bearer 로 보내면(쿠키·Basic 없이) 읽기 인증 통과.
+    tok = server._make_token("reader", "reader")
+    r = client.get("/", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+
+
+def test_bearer_forged_token_rejected():
+    # AC5: 위조 Bearer 토큰 → 미인증(401).
+    r = client.get("/", headers={"Authorization": "Bearer not.a.jwt", "accept": "application/json"},
+                   follow_redirects=False)
+    assert r.status_code == 401
+
+
+def test_bearer_expired_token_rejected():
+    # AC5: 만료 Bearer 토큰 → 미인증(401).
+    now = int(time.time())
+    tok = jwt.encode({"sub": "reader", "role": "reader", "iat": now - 100, "exp": now - 10},
+                     server.SECRET_KEY, algorithm="HS256")
+    r = client.get("/", headers={"Authorization": f"Bearer {tok}", "accept": "application/json"},
+                   follow_redirects=False)
+    assert r.status_code == 401
