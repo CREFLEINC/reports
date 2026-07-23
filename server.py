@@ -380,7 +380,12 @@ INDEX_CSS = """
   .upload-link{text-decoration:none; font-size:.82rem; font-weight:700; color:#fff;
                background:var(--red); padding:6px 12px; border-radius:999px;}
   .upload-link:hover{filter:brightness(.93);}
-  .lead{color:var(--muted); margin:16px 0 40px; font-size:.95rem;}
+  .lead{color:var(--muted); margin:16px 0 24px; font-size:.95rem;}
+  .filters{display:flex; gap:12px; flex-wrap:wrap; margin:0 0 36px;}
+  .filters input,.filters select{font:inherit; padding:9px 12px; border:1px solid var(--line);
+        border-radius:8px; background:var(--card); color:var(--ink);}
+  .filters input{flex:1; min-width:200px;}
+  .filters select{flex:0 0 auto;}
   .group{margin-bottom:40px;}
   .group-title{font-size:.78rem; font-weight:700; text-transform:uppercase;
                letter-spacing:.12em; color:var(--red); margin:0 0 14px;}
@@ -604,6 +609,41 @@ f.addEventListener('submit', async (e)=>{
 """
 
 
+INDEX_FILTER_JS = """
+(function(){
+  const search=document.getElementById('doc-search');
+  const typeSel=document.getElementById('doc-type-filter');
+  if(!search||!typeSel) return;
+  const countEl=document.getElementById('doc-count');
+  const emptyEl=document.getElementById('doc-empty');
+  const sections=Array.prototype.slice.call(document.querySelectorAll('section.group'));
+  const norm=s=>s.normalize('NFC').toLowerCase();
+  function apply(){
+    const q=norm(search.value.trim());
+    const g=typeSel.value;
+    let visible=0;
+    sections.forEach(sec=>{
+      const groupOk=(g==='' || sec.dataset.group===g);
+      let shown=0;
+      sec.querySelectorAll('li.card').forEach(card=>{
+        const t=card.querySelector('.card-title');
+        const name=t?norm(t.textContent):'';
+        const ok=groupOk && (q==='' || name.indexOf(q)!==-1);
+        card.style.display=ok?'':'none';
+        if(ok) shown++;
+      });
+      sec.style.display=shown?'':'none';
+      visible+=shown;
+    });
+    if(countEl) countEl.textContent=visible+'건';
+    if(emptyEl) emptyEl.style.display=visible?'none':'';
+  }
+  search.addEventListener('input',apply);
+  typeSel.addEventListener('change',apply);
+})();
+"""
+
+
 def render_index(docs: list, user: str, can_share: bool = False) -> str:
     groups = {}
     for d in docs:
@@ -651,8 +691,9 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
           </li>"""
             )
         cards_html = "\n".join(cards)
+        group_attr = html.escape(g)
         sections.append(
-            f"""        <section class="group">
+            f"""        <section class="group" data-group="{group_attr}">
           <h2 class="group-title">{label}</h2>
           <ul class="cards">
 {cards_html}
@@ -660,10 +701,32 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
         </section>"""
         )
 
-    body = "\n".join(sections) if sections else '        <p class="empty">표시할 문서가 없습니다.</p>'
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     count = len(docs)
     share_block = (SHARE_MODAL_HTML + f"\n  <script>{SHARE_MODAL_JS}</script>") if can_share else ""
+
+    if sections:
+        # 유형 select: "전체" + 현재 문서에 존재하는 그룹(값=그룹키, 표시=라벨, 렌더 순서 유지).
+        type_options = ['<option value="">전체</option>']
+        for g in ordered:
+            type_options.append(
+                f'<option value="{html.escape(g)}">{html.escape(_group_label(g))}</option>'
+            )
+        filter_bar = f"""    <div class="filters">
+      <input type="search" id="doc-search" placeholder="이름으로 검색…" autocomplete="off"
+             aria-label="이름으로 검색">
+      <select id="doc-type-filter" aria-label="유형 필터">{''.join(type_options)}</select>
+    </div>
+"""
+        body = "\n".join(sections) + (
+            '\n        <p class="empty" id="doc-empty" style="display:none;">'
+            "일치하는 문서가 없습니다.</p>"
+        )
+        filter_block = f"\n  <script>{INDEX_FILTER_JS}</script>"
+    else:
+        filter_bar = ""
+        body = '        <p class="empty">표시할 문서가 없습니다.</p>'
+        filter_block = ""
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -677,7 +740,7 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
   <div class="wrap">
     <header class="top">
       <span class="brand">CREFLE <span class="dot">Reports</span></span>
-      <span class="count">{count}건</span>
+      <span class="count" id="doc-count">{count}건</span>
       <a class="upload-link" href="/upload">+ 업로드</a>
       <form class="logout-form" method="post" action="/logout">
         <span class="who">{html.escape(user)}</span>
@@ -685,11 +748,11 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
       </form>
     </header>
     <p class="lead">보관 중인 제안서·보고서 목록입니다. 항목을 선택하면 문서로 이동합니다.</p>
-    <main>
+{filter_bar}    <main>
 {body}
     </main>
     <footer>생성 {generated} · 자동 색인</footer>
-  </div>{share_block}
+  </div>{share_block}{filter_block}
 </body>
 </html>"""
 
