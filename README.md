@@ -246,7 +246,26 @@ curl -u uploader:비밀번호 -X POST http://localhost:8000/api/v1/documents \
   -F doc_type=demo -F name=my-report -F version=2 -F file=@bundle.zip
 ```
 
-라우트·테스트: `server.py`(`POST /upload` 과 핸들러 공유) · `tests/test_uploads.py`.
+**토큰 발급 + Bearer 인증 (이슈 #19)**: 매 요청 원문 자격증명(Basic)을 보내는 대신, JWT 를 한 번
+발급받아 `Authorization: Bearer` 헤더로 인증한다(위 Basic 방식도 그대로 유효). `POST /api/v1/auth/token`
+에 form 자격증명(`username`/`password`)을 보내면 `{access_token, token_type: "Bearer", expires_in}` 을
+받는다. uploader 자격증명이면 업로드 권한까지, reader 면 읽기 전용 토큰이다. 토큰 수명은 쿠키 세션과 동일한
+`REPORTS_TOKEN_TTL`(기본 14일). 잘못된 자격증명은 401.
+
+```bash
+# 1) 토큰 발급 (form: username/password)
+curl -X POST http://localhost:8000/api/v1/auth/token \
+  -F username=uploader -F password=비밀번호
+# → {"access_token":"<JWT>","token_type":"Bearer","expires_in":1209600}
+
+# 2) 발급받은 토큰으로 문서 등록 (Authorization: Bearer)
+curl -X POST http://localhost:8000/api/v1/documents \
+  -H "Authorization: Bearer <JWT>" \
+  -F doc_type=demo -F name=my-report -F version=3 -F file=@report.html
+```
+
+라우트·테스트: `server.py`(`POST /upload` 과 핸들러 공유, `POST /api/v1/auth/token` 토큰 발급) ·
+`tests/test_uploads.py` · `tests/test_auth.py`.
 
 ## 문서 유형 관리 (이슈 #6)
 

@@ -330,3 +330,44 @@ def test_api_documents_unauthenticated_401():
         files={"file": ("report.html", HTML, "text/html")},
     )
     assert r.status_code == 401, r.text
+
+
+# ── e2e: POST /api/v1/documents + Authorization: Bearer (이슈 #19) ────────────
+def test_api_documents_bearer_uploader_publishes(cleanup_api_docs):
+    # AC3: uploader Bearer 토큰(쿠키·Basic 없이) → 201 게시.
+    type_dir = cleanup_api_docs
+    tok = server._make_token("uploader", "uploader")
+    c = TestClient(app)
+    r = c.post(
+        "/api/v1/documents",
+        headers={"Authorization": f"Bearer {tok}"},
+        data={"doc_type": "apitest", "name": "apibearer", "version": "1"},
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert r.status_code == 201, r.text
+    assert (type_dir / "apibearer_v1" / "index.html").is_file()
+
+
+def test_api_documents_bearer_reader_forbidden():
+    # AC4: reader 역할 Bearer 토큰 → 403(게시 없음 → 정리 불필요).
+    tok = server._make_token("reader", "reader")
+    c = TestClient(app)
+    r = c.post(
+        "/api/v1/documents",
+        headers={"Authorization": f"Bearer {tok}", "accept": "application/json"},
+        data={"doc_type": "apitest", "name": "apireader", "version": "1"},
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_api_documents_bearer_forged_401():
+    # AC5: 위조 Bearer 토큰 → 401.
+    c = TestClient(app)
+    r = c.post(
+        "/api/v1/documents",
+        headers={"Authorization": "Bearer not.a.valid.jwt", "accept": "application/json"},
+        data={"doc_type": "apitest", "name": "apiforged", "version": "1"},
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert r.status_code == 401, r.text
