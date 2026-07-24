@@ -614,9 +614,13 @@ INDEX_FILTER_JS = """
   const search=document.getElementById('doc-search');
   const typeSel=document.getElementById('doc-type-filter');
   if(!search||!typeSel) return;
+  // 두 컨트롤을 찾은 뒤에만 필터 바 노출 — JS 미실행 시 동작 없는 컨트롤을 숨겨 오해 차단.
+  const filters=document.getElementById('doc-filters');
+  if(filters) filters.hidden=false;
   const countEl=document.getElementById('doc-count');
   const emptyEl=document.getElementById('doc-empty');
   const sections=Array.prototype.slice.call(document.querySelectorAll('section.group'));
+  const total=document.querySelectorAll('li.card').length;  // 전체 문서 수(초기 고정)
   const norm=s=>s.normalize('NFC').toLowerCase();
   function apply(){
     const q=norm(search.value.trim());
@@ -635,7 +639,8 @@ INDEX_FILTER_JS = """
       sec.style.display=shown?'':'none';
       visible+=shown;
     });
-    if(countEl) countEl.textContent=visible+'건';
+    // 필터 활성 시 "표시 N / 전체 M건", 해제 시 "M건" 으로 복귀.
+    if(countEl) countEl.textContent=(q!==''||g!=='')?('표시 '+visible+' / 전체 '+total+'건'):(total+'건');
     if(emptyEl) emptyEl.style.display=visible?'none':'';
   }
   search.addEventListener('input',apply);
@@ -712,14 +717,14 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
             type_options.append(
                 f'<option value="{html.escape(g)}">{html.escape(_group_label(g))}</option>'
             )
-        filter_bar = f"""    <div class="filters">
+        filter_bar = f"""    <div class="filters" id="doc-filters" hidden>
       <input type="search" id="doc-search" placeholder="이름으로 검색…" autocomplete="off"
              aria-label="이름으로 검색">
       <select id="doc-type-filter" aria-label="유형 필터">{''.join(type_options)}</select>
     </div>
 """
         body = "\n".join(sections) + (
-            '\n        <p class="empty" id="doc-empty" style="display:none;">'
+            '\n        <p class="empty" id="doc-empty" role="status" style="display:none;">'
             "일치하는 문서가 없습니다.</p>"
         )
         filter_block = f"\n  <script>{INDEX_FILTER_JS}</script>"
@@ -740,7 +745,7 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
   <div class="wrap">
     <header class="top">
       <span class="brand">CREFLE <span class="dot">Reports</span></span>
-      <span class="count" id="doc-count">{count}건</span>
+      <span class="count" id="doc-count" aria-live="polite">{count}건</span>
       <a class="upload-link" href="/upload">+ 업로드</a>
       <form class="logout-form" method="post" action="/logout">
         <span class="who">{html.escape(user)}</span>

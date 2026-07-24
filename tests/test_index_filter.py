@@ -125,3 +125,35 @@ def test_filter_bar_absent_when_no_docs():
     html = server.render_index([], "tester")
     assert 'id="doc-search"' not in html
     assert "표시할 문서가 없습니다" in html
+
+
+# ── 이슈 #27: 건수·빈결과 안내에 라이브 리전 부여(스크린리더 낭독) ────────────
+def test_count_has_aria_live_polite():
+    # #doc-count 는 aria-live="polite" — 필터 시 갱신되는 건수를 낭독한다.
+    html = server.render_index(_sample_docs(), "tester")
+    assert 'id="doc-count" aria-live="polite"' in html
+
+
+def test_empty_notice_has_role_status():
+    # #doc-empty 는 role="status"(암묵 polite 라이브 리전) — 결과 없음 안내를 낭독.
+    html = server.render_index(_sample_docs(), "tester")
+    assert 'id="doc-empty" role="status"' in html
+
+
+# ── 이슈 #28: 필터 바는 hidden 으로 렌더, JS 초기화가 노출 ────────────────────
+def test_filter_bar_hidden_until_js():
+    html = server.render_index(_sample_docs(), "tester")
+    # JS 미실행 시 필터 바가 화면에 안 나타나도록 hidden 으로 렌더.
+    assert '<div class="filters" id="doc-filters" hidden>' in html
+    # INDEX_FILTER_JS 는 두 컨트롤을 찾은 뒤 hidden 을 해제한다(정적 확인).
+    assert "filters.hidden=false" in html
+
+
+# ── 이슈 #29: 필터 활성 시 "표시 N / 전체 M건", 해제 시 "M건" ─────────────────
+def test_count_badge_active_and_inactive_format():
+    html = server.render_index(_sample_docs(), "tester")
+    # M(전체)은 초기화 시 카드 수로 계산 — 서버 값 재주입 불필요.
+    assert "document.querySelectorAll('li.card').length" in html
+    # 활성: "표시 N / 전체 M건" · 비활성: "M건".
+    assert "'표시 '+visible+' / 전체 '+total+'건'" in html
+    assert "(total+'건')" in html
