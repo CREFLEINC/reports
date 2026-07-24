@@ -15,16 +15,17 @@ CREFLE Reports — 자체 HTML 문서 열람 + 웹 업로드 서버 (FastAPI)
     GET  /login       로그인 폼 (무인증)
     POST /login       자격증명 검증 → JWT 쿠키 발급
     POST /logout      JWT 쿠키 삭제(로그아웃)
-    POST /api/share          자료별 외부 공개 링크 생성 (uploader 전용)
-    GET  /api/share?doc=…    자료의 활성 공개 1건 조회 (uploader 전용, 모달용)
-    DELETE /api/share/{tok}  공개 해제 (uploader 전용)
+    POST /api/share          자료별 외부 공개 링크 생성 (system_admin 전용)
+    GET  /api/share?doc=…    자료의 활성 공개 1건 조회 (system_admin 전용, 모달용)
+    DELETE /api/share/{tok}  공개 해제 (system_admin 전용)
     GET  /s/{tok}            공개 랜딩(무인증): 열람·PDF 버튼 / 비번 폼 / 만료·해제 안내
     POST /s/{tok}/unlock     비번 검증 → 잠금해제 쿠키(무인증)
     GET  /s/{tok}/view[/…]   공개 문서·공유 에셋 제공(무인증, 형제 문서·소유외 PDF 차단)
     GET  /s/{tok}/pdf        공개 PDF 다운로드(무인증)
     GET  /<경로>      문서·에셋 파일 제공 (proposals/ + uploads/docs/ 범위로만 제한)
-/healthz·/s/* 외 읽기는 verify(JWT 쿠키 또는 Basic 헤더), 쓰기(/upload)·공개관리(/api/share*)는
-require_uploader(uploader 역할). /s/* 공개 라우트는 무인증이며 토큰·비번·만료로만 접근을 제한한다.
+/healthz·/s/* 외 읽기는 verify(JWT 쿠키 또는 Basic 헤더), 쓰기(/upload·/api/v1/documents)는
+require_can_upload(user 이상), 유형·공개관리(/types·/api/types*·/api/share*)는 require_system_admin.
+/s/* 공개 라우트는 무인증이며 토큰·비번·만료로만 접근을 제한한다.
 브라우저는 /login 으로 로그인해 JWT 쿠키를 받고 /logout 으로 비운다. Basic 헤더는 자동화(register_report.sh
 등 Sec-Fetch-* 없는 클라이언트)용 폴백이며, 브라우저 요청에선 무시된다(캐시된 Basic 이 로그아웃을 무력화 못 하게).
 REST API 클라이언트는 POST /api/v1/auth/token 으로 JWT 를 발급받아 Authorization: Bearer 헤더로 인증한다
@@ -48,6 +49,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import logging
 import os
 import re
@@ -57,6 +59,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from urllib.parse import quote
 
 import jwt
@@ -68,6 +71,7 @@ from pydantic import BaseModel
 import doctypes
 import shares
 import uploads_handler
+import users
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -145,12 +149,15 @@ def _eq(a: str, b: str) -> bool:
 
 
 def _role_for_credentials(username: str, password: str) -> str | None:
-    """자격증명 → 역할('uploader'|'reader') 또는 None. 강한 uploader 계정을 먼저 검사."""
+    """자격증명 → 역할 문자열 또는 None. 강한 env 계정을 먼저 검사한 뒤 저장소 사용자.
+
+    env 계정은 와이어 포맷('uploader'/'reader')을 반환한다(레거시 토큰·자동화 호환). 저장소
+    사용자는 4역할 문자열을 반환하며 active=True 인 계정만 인증된다(정지 계정은 None)."""
     if UPLOAD_PASS and _eq(username, UPLOAD_USER) and _eq(password, UPLOAD_PASS):
         return "uploader"
     if _eq(username, USERNAME) and _eq(password, PASSWORD):
         return "reader"
-    return None
+    return users.verify_credentials(username, password)
 
 
 def _make_token(username: str, role: str) -> str:
@@ -178,21 +185,40 @@ def _is_browser(request: Request) -> bool:
     return "sec-fetch-site" in h or "sec-fetch-mode" in h or "sec-fetch-dest" in h
 
 
+def _resolve_identity(sub: str, role: str) -> tuple[str, str] | None:
+    """토큰/Basic 에서 얻은 (sub, role) 을 검증·정규화해 (user, 정규화역할) 또는 None.
+
+    role 이 알려진 역할(KNOWN_ROLES)이 아니면 None. sub 가 저장소 사용자면 active 를 확인해
+    정지(active=False) 계정은 기발급 토큰이라도 즉시 거부한다. 저장소에 없는 sub(env 계정·
+    과거 토큰)는 기존대로 통과한다. 반환 역할은 4역할로 정규화된다(uploader→system_admin,
+    reader→viewer)."""
+    if role not in users.KNOWN_ROLES:
+        return None
+    stored = users.get_user(sub) if sub else None
+    if stored is not None and not stored.get("active"):
+        return None
+    return sub, users.normalize_role(role)
+
+
 def _identify(request: Request) -> tuple[str, str] | None:
-    """(user, role) 또는 None. JWT 쿠키 우선, 그다음 Basic 헤더(자동화 전용 폴백)."""
+    """(user, 정규화역할) 또는 None. JWT 쿠키 우선, Bearer, 그다음 Basic(자동화 전용 폴백)."""
     token = request.cookies.get(COOKIE_NAME)
     if token:
         payload = _decode_token(token)
-        if payload and payload.get("role") in ("reader", "uploader"):
-            return str(payload.get("sub", "")), payload["role"]
+        if payload:
+            ident = _resolve_identity(str(payload.get("sub", "")), payload.get("role", ""))
+            if ident:
+                return ident
     # Bearer 토큰: REST API 클라이언트가 POST /api/v1/auth/token 으로 발급받은 JWT.
     # 브라우저는 Bearer 를 자발적으로 보내지 않으므로(캐시된 Basic 자격증명 문제와 무관)
     # _is_browser 게이트 앞에서 인정한다.
     bearer = request.headers.get("Authorization", "")
     if bearer.startswith("Bearer "):
         payload = _decode_token(bearer[7:])
-        if payload and payload.get("role") in ("reader", "uploader"):
-            return str(payload.get("sub", "")), payload["role"]
+        if payload:
+            ident = _resolve_identity(str(payload.get("sub", "")), payload.get("role", ""))
+            if ident:
+                return ident
     # Basic 헤더는 자동화(curl 등)에서만 인정한다. 브라우저(Sec-Fetch-* 존재)에서는 무시 —
     # 구 시스템의 캐시된 Basic 자격증명이 로그아웃을 무력화하지 못하게 하기 위함.
     if _is_browser(request):
@@ -208,7 +234,7 @@ def _identify(request: Request) -> tuple[str, str] | None:
             return None
         role = _role_for_credentials(user, pwd)
         if role:
-            return user, role
+            return user, users.normalize_role(role)
     return None
 
 
@@ -245,18 +271,52 @@ def verify(request: Request) -> str:
     return verify_identity(request)[0]
 
 
-def require_uploader(request: Request) -> str:
-    """쓰기 인증: uploader 역할 필요. UPLOAD_PASS 미설정이면 503(fail-closed)."""
+def require_can_upload(request: Request) -> tuple[str, str]:
+    """업로드 인증: 정규화 역할이 user 이상(user·admin·system_admin)이면 (user, 역할) 반환.
+
+    UPLOAD_PASS 미설정이면 503(fail-closed, 기존 동작 유지). viewer·권한부족은 403, 미인증 API 는
+    401, 미인증 브라우저는 /login 리다이렉트. 반환한 역할은 소유권 판정을 위해 핸들러로 넘긴다."""
     if not UPLOAD_PASS:
         raise HTTPException(status_code=503, detail="업로드 비활성화됨(REPORTS_UPLOAD_PASS 미설정).")
     ident = _identify(request)
-    if ident and ident[1] == "uploader":
-        return ident[0]
+    if ident and users.role_at_least(ident[1], "user"):
+        return ident
     if ident is None:
         if _wants_html(request):
             raise NeedsLogin(request.url.path)
         raise HTTPException(status_code=401, detail="업로드 인증이 필요합니다.")
     raise HTTPException(status_code=403, detail="업로드 권한이 없습니다.")
+
+
+def require_system_admin(request: Request) -> str:
+    """system_admin 전용 인증: 정규화 역할이 system_admin 이면 user 반환.
+
+    유형 관리(/types·/api/types*)·공개 관리(/api/share*) 등 파괴적 작업을 게이팅한다. 미인증
+    브라우저는 /login 리다이렉트, 미인증 API 는 401, 권한 부족(admin·user·viewer)은 403. 사용자
+    관리처럼 업로드 활성화(UPLOAD_PASS)와는 무관하다(업로드 비활성 상태에서도 관리 가능)."""
+    ident = _identify(request)
+    if ident and ident[1] == "system_admin":
+        return ident[0]
+    if ident is None:
+        if _wants_html(request):
+            raise NeedsLogin(request.url.path)
+        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+    raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+
+def require_admin(request: Request) -> tuple[str, str]:
+    """사용자 관리 인증: 정규화 역할이 admin 이상(admin|system_admin)이면 (user, 역할) 반환.
+
+    require_system_admin 과 같은 분기를 따른다 — 미인증 브라우저는 /login 리다이렉트, 미인증 API 는
+    401, 권한 부족(user·viewer)은 403. 업로드와 달리 UPLOAD_PASS 설정과 무관하다."""
+    ident = _identify(request)
+    if ident and users.role_at_least(ident[1], "admin"):
+        return ident
+    if ident is None:
+        if _wants_html(request):
+            raise NeedsLogin(request.url.path)
+        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+    raise HTTPException(status_code=403, detail="사용자 관리 권한이 없습니다.")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -650,7 +710,8 @@ INDEX_FILTER_JS = """
 """
 
 
-def render_index(docs: list, user: str, can_share: bool = False) -> str:
+def render_index(docs: list, user: str, can_share: bool = False,
+                 can_upload: bool = False, can_admin: bool = False) -> str:
     groups = {}
     for d in docs:
         groups.setdefault(d["group"], []).append(d)
@@ -710,6 +771,9 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     count = len(docs)
     share_block = (SHARE_MODAL_HTML + f"\n  <script>{SHARE_MODAL_JS}</script>") if can_share else ""
+    # 헤더 관리 링크: admin 이상만 사용자 관리, user 이상만 업로드 버튼(viewer 는 열람만).
+    admin_link = '\n      <a class="upload-link" href="/admin/users">관리</a>' if can_admin else ""
+    upload_link = '\n      <a class="upload-link" href="/upload">+ 업로드</a>' if can_upload else ""
 
     if sections:
         # 유형 select: "전체" + 현재 문서에 존재하는 그룹(값=그룹키, 표시=라벨, 렌더 순서 유지).
@@ -746,8 +810,7 @@ def render_index(docs: list, user: str, can_share: bool = False) -> str:
   <div class="wrap">
     <header class="top">
       <span class="brand">CREFLE <span class="dot">Reports</span></span>
-      <span class="count" id="doc-count" aria-live="polite">{count}건</span>
-      <a class="upload-link" href="/upload">+ 업로드</a>
+      <span class="count" id="doc-count" aria-live="polite">{count}건</span>{admin_link}{upload_link}
       <form class="logout-form" method="post" action="/logout">
         <span class="who">{html.escape(user)}</span>
         <button class="logout-btn" type="submit">로그아웃</button>
@@ -919,6 +982,161 @@ def render_types_page() -> str:
     <div id="tmsg"></div>
   </div>
   <script>{TYPES_PAGE_JS}</script>
+</body>
+</html>"""
+
+
+# 4역할 → 한국어 라벨(페이지·JS 공용). 서열 높은 순.
+ROLE_LABELS = {
+    "system_admin": "시스템 관리자",
+    "admin": "일반 관리자",
+    "user": "사용자",
+    "viewer": "뷰어",
+}
+
+
+def _assignable_roles(current_role: str) -> list[str]:
+    """요청자가 등록·부여할 수 있는 역할 목록(강→약). system_admin 은 4역할 전부,
+    admin 은 user·viewer 만. 등록 폼 select 와 JS 관리 대상 판정에 함께 쓰인다."""
+    if current_role == "system_admin":
+        return ["system_admin", "admin", "user", "viewer"]
+    return ["user", "viewer"]
+
+
+USERS_PAGE_CSS = """
+  .users-wrap{max-width:760px;}
+  table.users{width:100%; border-collapse:collapse; margin-top:6px;}
+  table.users th, table.users td{padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle;}
+  table.users th{font-size:.74rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-weight:600;}
+  table.users td.email{font-family:ui-monospace,Menlo,monospace; font-size:.84rem; word-break:break-all;}
+  table.users td.created{color:var(--muted); font-size:.82rem; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  table.users td.act{text-align:right; white-space:nowrap;}
+  .status{font-size:.72rem; font-weight:700; border-radius:999px; padding:2px 10px; white-space:nowrap;}
+  .status.on{color:#1e7e34; border:1px solid #1e7e34;}
+  .status.off{color:var(--red); border:1px solid var(--red);}
+  form.adduser{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:22px;
+    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px;}
+  form.adduser .field{flex:1; min-width:150px; margin:0;}
+  form.adduser label{display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px;}
+  form.adduser input, form.adduser select{width:100%; padding:9px 11px; border:1px solid var(--line);
+    border-radius:9px; background:var(--bg); color:var(--ink); font-size:.92rem;}
+  #umsg{margin:12px 0 0; font-size:.88rem; min-height:1.2em;}
+  #umsg.ok{color:#1e7e34;} #umsg.err{color:var(--red);}
+"""
+
+USERS_PAGE_JS = r"""
+const $ = (s,el=document)=>el.querySelector(s);
+const tbody = $('#urows'), msg = $('#umsg');
+const ROLE_LABELS = {system_admin:'시스템 관리자', admin:'일반 관리자', user:'사용자', viewer:'뷰어'};
+function say(t, ok){ msg.textContent=t; msg.className = ok?'ok':'err'; }
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function fmtDate(ts){ const d=new Date(ts*1000); return isNaN(d.getTime())?'':d.toISOString().split('T')[0]; }
+function canManage(u){ return MANAGE_ROLES.indexOf(u.role) !== -1; }
+async function api(method, url, body){
+  const opt={method, headers:{}};
+  if(body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+  const r = await fetch(url, opt);
+  let data=null; try{ data=await r.json(); }catch(e){}
+  return {ok:r.ok, status:r.status, data};
+}
+function row(u){
+  const tr=document.createElement('tr');
+  const manage = canManage(u);
+  const label = ROLE_LABELS[u.role] || u.role;
+  const status = u.active ? '<span class="status on">활성</span>' : '<span class="status off">정지</span>';
+  const toggle = u.active ? '정지' : '활성화';
+  const dis = manage ? '' : 'disabled';
+  tr.innerHTML =
+    '<td class="email">'+esc(u.email)+'</td>'+
+    '<td>'+esc(label)+'</td>'+
+    '<td>'+status+'</td>'+
+    '<td class="created">'+fmtDate(u.created_at)+'</td>'+
+    '<td class="act">'+
+      '<button class="tbtn tgl" '+dis+'>'+toggle+'</button>'+
+      '<button class="tbtn pw" '+dis+'>비밀번호 재설정</button>'+
+      '<button class="tbtn role" '+dis+'>역할 변경</button>'+
+    '</td>';
+  if(manage){
+    tr.querySelector('.tgl').onclick = ()=>toggleActive(u);
+    tr.querySelector('.pw').onclick = ()=>resetPassword(u);
+    tr.querySelector('.role').onclick = ()=>changeRole(u);
+  }
+  return tr;
+}
+async function loadUsers(){
+  const {ok,data} = await api('GET','/api/v1/users');
+  if(!ok){ say('목록을 불러오지 못했습니다.', false); return; }
+  tbody.innerHTML=''; data.forEach(u=>tbody.appendChild(row(u)));
+}
+async function toggleActive(u){
+  const verb = u.active ? '정지' : '활성화';
+  if(!confirm('사용자 "'+u.email+'"을(를) '+verb+'할까요?')) return;
+  const {ok,status,data} = await api('PATCH','/api/v1/users/'+encodeURIComponent(u.email), {active: !u.active});
+  if(ok){ say(verb+'했습니다.', true); loadUsers(); }
+  else say((data&&data.detail)||('실패 ('+status+')'), false);
+}
+async function resetPassword(u){
+  const np = prompt('새 비밀번호 ('+u.email+')');
+  if(np===null) return;
+  const {ok,status,data} = await api('PATCH','/api/v1/users/'+encodeURIComponent(u.email), {password: np});
+  if(ok) say('비밀번호를 변경했습니다.', true);
+  else say((data&&data.detail)||('실패 ('+status+')'), false);
+}
+async function changeRole(u){
+  const choices = MANAGE_ROLES.map(r=>r+' ('+ROLE_LABELS[r]+')').join('\n');
+  const nr = prompt('새 역할을 입력하세요:\n'+choices, u.role);
+  if(nr===null) return;
+  const {ok,status,data} = await api('PATCH','/api/v1/users/'+encodeURIComponent(u.email), {role: nr.trim()});
+  if(ok){ say('역할을 변경했습니다.', true); loadUsers(); }
+  else say((data&&data.detail)||('실패 ('+status+')'), false);
+}
+$('#adduser').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const email=$('#uemail').value, password=$('#upw').value, role=$('#urole').value;
+  const {ok,status,data} = await api('POST','/api/v1/users', {email, password, role});
+  if(ok){ say('사용자를 등록했습니다.', true); $('#uemail').value=''; $('#upw').value=''; loadUsers(); }
+  else say((data&&data.detail)||('등록 실패 ('+status+')'), false);
+});
+loadUsers();
+"""
+
+
+def render_users_page(current_role: str) -> str:
+    """사용자 관리 페이지. current_role 로 등록 폼 역할 select 와 JS 관리 대상 범위를 정한다."""
+    roles = _assignable_roles(current_role)
+    role_opts = "".join(
+        f'<option value="{r}">{html.escape(ROLE_LABELS[r])}</option>' for r in roles
+    )
+    manage_roles = json.dumps(roles)
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>사용자 관리 · CREFLE Reports</title>
+<style>{INDEX_CSS}{UPLOAD_FORM_CSS}{TYPES_PAGE_CSS}{USERS_PAGE_CSS}</style>
+</head>
+<body>
+  <div class="wrap users-wrap">
+    <header class="top">
+      <span class="brand">CREFLE <span class="dot">Reports</span> · 사용자 관리</span>
+      <a class="upload-link" href="/" style="margin-left:auto;">목차</a>
+    </header>
+    <p class="lead">계정을 등록하고 정지·활성화·비밀번호·역할을 관리합니다. 이메일(아이디)은 변경할 수 없으며, 계정 삭제 대신 정지로 접근을 차단합니다.</p>
+    <table class="users">
+      <thead><tr><th>이메일</th><th>역할</th><th>상태</th><th>생성일</th><th></th></tr></thead>
+      <tbody id="urows"></tbody>
+    </table>
+    <form class="adduser" id="adduser">
+      <div class="field"><label>이메일 (아이디)</label><input id="uemail" type="email" required placeholder="user@crefle.com" autocomplete="off"></div>
+      <div class="field"><label>비밀번호</label><input id="upw" type="password" required autocomplete="new-password"></div>
+      <div class="field"><label>역할</label><select id="urole">{role_opts}</select></div>
+      <button class="submit" type="submit" style="flex:0 0 auto;">사용자 등록</button>
+    </form>
+    <div id="umsg"></div>
+  </div>
+  <script>const MANAGE_ROLES = {manage_roles};</script>
+  <script>{USERS_PAGE_JS}</script>
 </body>
 </html>"""
 
@@ -1131,12 +1349,17 @@ def healthz() -> dict:
 @app.get("/", response_class=HTMLResponse)
 def index(ident: tuple = Depends(verify_identity)) -> HTMLResponse:
     user, role = ident
-    return HTMLResponse(render_index(discover_documents(), user, can_share=(role == "uploader")))
+    return HTMLResponse(render_index(
+        discover_documents(), user,
+        can_share=(role == "system_admin"),
+        can_upload=users.role_at_least(role, "user"),
+        can_admin=users.role_at_least(role, "admin"),
+    ))
 
 
 # 업로드 라우트는 catch-all 보다 먼저 등록해야 한다(그렇지 않으면 catch-all 이 삼킴).
 @app.get("/upload", response_class=HTMLResponse)
-def upload_form(_: str = Depends(require_uploader)) -> HTMLResponse:
+def upload_form(_: tuple = Depends(require_can_upload)) -> HTMLResponse:
     return HTMLResponse(render_upload_form())
 
 
@@ -1148,8 +1371,9 @@ async def upload(
     version: str = Form(...),
     file: UploadFile = File(...),
     overwrite: int = Form(0),
-    uploader: str = Depends(require_uploader),
+    ident: tuple = Depends(require_can_upload),
 ) -> JSONResponse:
+    uploader, role = ident
     client_ip = request.client.host if request.client else "?"
     result = await uploads_handler.handle_upload(
         file=file,
@@ -1158,6 +1382,7 @@ async def upload(
         version=version,
         client_ip=client_ip,
         uploader=uploader,
+        role=role,
         overwrite=bool(overwrite),
     )
     return JSONResponse(result, status_code=201)
@@ -1171,13 +1396,14 @@ async def api_v1_documents_create(
     version: str = Form(...),
     file: UploadFile = File(...),
     overwrite: int = Form(0),
-    uploader: str = Depends(require_uploader),
+    ident: tuple = Depends(require_can_upload),
 ) -> JSONResponse:
     """문서 등록 API — GUI POST /upload 와 동일 계약을 handle_upload() 로 재사용하는 얇은 래퍼.
 
     성공 시 201 + 핸들러 반환(status·href·pdf_pending)에 정규화된 type·name·version 을 에코하고
     응답 헤더 Location=href 를 붙인다. 정규화 값은 핸들러가 내부에서 쓰는 것과 동일한 헬퍼로
     재계산한다(로직 복제/핸들러 수정 아님). 입력 검증·보안·게시는 모두 핸들러가 수행한다."""
+    uploader, role = ident
     client_ip = request.client.host if request.client else "?"
     result = await uploads_handler.handle_upload(
         file=file,
@@ -1186,6 +1412,7 @@ async def api_v1_documents_create(
         version=version,
         client_ip=client_ip,
         uploader=uploader,
+        role=role,
         overwrite=bool(overwrite),
     )
     payload = {
@@ -1247,7 +1474,7 @@ def logout() -> Response:
 
 # ──────────────────────────────────────────────────────────────────────────
 # 자료별 공개(public share) — catch-all 보다 먼저 등록해야 한다.
-# 관리 API(/api/share*)는 uploader 전용. 공개 접근(/s/*)은 무인증(토큰·비번으로만 제한).
+# 관리 API(/api/share*)는 system_admin 전용. 공개 접근(/s/*)은 무인증(토큰·비번으로만 제한).
 # ──────────────────────────────────────────────────────────────────────────
 class ShareCreateRequest(BaseModel):
     doc_rel: str
@@ -1266,7 +1493,7 @@ def _find_doc(doc_rel: str) -> dict | None:
 
 @app.post("/api/share")
 def api_share_create(req: ShareCreateRequest, request: Request,
-                     uploader: str = Depends(require_uploader)) -> JSONResponse:
+                     uploader: str = Depends(require_system_admin)) -> JSONResponse:
     doc = _find_doc(req.doc_rel)
     candidate = (BASE_DIR / req.doc_rel).resolve()
     if not doc or not any(_is_within(candidate, r) for r in DOCS_ROOTS) or not candidate.is_file():
@@ -1287,7 +1514,7 @@ def api_share_create(req: ShareCreateRequest, request: Request,
 
 @app.get("/api/share")
 def api_share_current(request: Request, doc: str = Query(...),
-                      _: str = Depends(require_uploader)) -> JSONResponse:
+                      _: str = Depends(require_system_admin)) -> JSONResponse:
     """해당 자료의 활성 공개 1건(모달 재오픈 시 기존 링크/해제 노출용)."""
     rec = shares.find_active_by_doc(doc)
     if not rec:
@@ -1298,7 +1525,7 @@ def api_share_current(request: Request, doc: str = Query(...),
 
 
 @app.delete("/api/share/{token}")
-def api_share_delete(token: str, _: str = Depends(require_uploader)) -> Response:
+def api_share_delete(token: str, _: str = Depends(require_system_admin)) -> Response:
     shares.delete_share(token)  # 없는 토큰도 멱등 — 204
     return Response(status_code=204)
 
@@ -1372,7 +1599,7 @@ def share_pdf(token: str, request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# 문서 유형 관리 (uploader 전용) — catch-all 보다 먼저 등록해야 한다.
+# 문서 유형 관리 (system_admin 전용) — catch-all 보다 먼저 등록해야 한다.
 # ──────────────────────────────────────────────────────────────────────────
 class TypeCreateRequest(BaseModel):
     slug: str
@@ -1415,17 +1642,17 @@ def _move_type_docs_to_etc(slug: str) -> tuple[int, dict]:
 
 
 @app.get("/types", response_class=HTMLResponse)
-def types_page(_: str = Depends(require_uploader)) -> HTMLResponse:
+def types_page(_: str = Depends(require_system_admin)) -> HTMLResponse:
     return HTMLResponse(render_types_page())
 
 
 @app.get("/api/types")
-def api_types_list(_: str = Depends(require_uploader)) -> JSONResponse:
+def api_types_list(_: str = Depends(require_system_admin)) -> JSONResponse:
     return JSONResponse([{**t, "count": _type_doc_count(t["slug"])} for t in doctypes.load_types()])
 
 
 @app.post("/api/types")
-def api_types_create(req: TypeCreateRequest, _: str = Depends(require_uploader)) -> JSONResponse:
+def api_types_create(req: TypeCreateRequest, _: str = Depends(require_system_admin)) -> JSONResponse:
     try:
         rec = doctypes.add_type(req.slug, req.label)
     except ValueError as e:
@@ -1436,7 +1663,7 @@ def api_types_create(req: TypeCreateRequest, _: str = Depends(require_uploader))
 
 @app.patch("/api/types/{slug}")
 def api_types_rename(slug: str, req: TypeLabelRequest,
-                     _: str = Depends(require_uploader)) -> JSONResponse:
+                     _: str = Depends(require_system_admin)) -> JSONResponse:
     try:
         rec = doctypes.rename_type(slug, req.label)
     except ValueError as e:
@@ -1446,7 +1673,7 @@ def api_types_rename(slug: str, req: TypeLabelRequest,
 
 
 @app.delete("/api/types/{slug}")
-def api_types_delete(slug: str, _: str = Depends(require_uploader)) -> JSONResponse:
+def api_types_delete(slug: str, _: str = Depends(require_system_admin)) -> JSONResponse:
     try:
         norm = doctypes.normalize_slug(slug)
     except ValueError as e:
@@ -1461,6 +1688,92 @@ def api_types_delete(slug: str, _: str = Depends(require_uploader)) -> JSONRespo
         shares.rebase_doc_paths(dir_map)
     doctypes.delete_type(norm)
     return JSONResponse({"slug": norm, "moved": moved})
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 사용자 관리 (admin 이상) — catch-all 보다 먼저 등록해야 한다.
+# admin 은 user·viewer 범위만 등록·수정하고, system_admin 은 4역할 전부 관리한다.
+# ──────────────────────────────────────────────────────────────────────────
+class UserCreateRequest(BaseModel):
+    email: str
+    password: str
+    role: str
+
+
+class UserUpdateRequest(BaseModel):
+    # 세 필드 모두 선택적(tri-state). 미전달은 None, 전달값만 반영한다.
+    password: Optional[str] = None
+    role: Optional[str] = None
+    active: Optional[bool] = None
+
+
+def _reject_if_admin_exceeds_scope(actor_role: str, target_role: str) -> None:
+    """admin 이 user·viewer 밖(admin·system_admin) 역할을 다루면 403. system_admin 은 제한 없음.
+    target_role 은 정규화된 4역할이어야 한다(호출 전 normalize_role)."""
+    if actor_role != "system_admin" and not users.role_at_least("user", target_role):
+        raise HTTPException(status_code=403, detail="일반 관리자는 사용자·뷰어만 관리할 수 있습니다.")
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def users_page(ident: tuple = Depends(require_admin)) -> HTMLResponse:
+    return HTMLResponse(render_users_page(ident[1]))
+
+
+@app.get("/api/v1/users")
+def api_v1_users_list(_: tuple = Depends(require_admin)) -> JSONResponse:
+    """전체 사용자 목록(public_view — 해시·비번 미노출). 각 항목의 role 로 요청자가 수정 가능
+    여부를 판단한다."""
+    return JSONResponse(users.list_users())
+
+
+@app.post("/api/v1/users")
+def api_v1_users_create(req: UserCreateRequest,
+                        ident: tuple = Depends(require_admin)) -> JSONResponse:
+    _, actor_role = ident
+    try:
+        target_role = users.normalize_role(req.role)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    _reject_if_admin_exceeds_scope(actor_role, target_role)
+    try:
+        rec = users.add_user(req.email, req.password, req.role)
+    except ValueError as e:
+        msg = str(e)
+        raise HTTPException(status_code=409 if "이미 등록" in msg else 422, detail=msg)
+    return JSONResponse(rec, status_code=201)
+
+
+@app.patch("/api/v1/users/{email}")
+def api_v1_users_update(email: str, req: UserUpdateRequest,
+                        ident: tuple = Depends(require_admin)) -> JSONResponse:
+    actor, actor_role = ident
+    if req.password is None and req.role is None and req.active is None:
+        raise HTTPException(status_code=422, detail="변경할 내용이 없습니다.")
+    new_role = None
+    if req.role is not None:
+        try:
+            new_role = users.normalize_role(req.role)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    target = users.get_user(email)
+    if target is None:  # 저장소 밖(env 가상 계정 포함) → 404
+        raise HTTPException(status_code=404, detail="존재하지 않는 사용자입니다.")
+    # admin 제약: 대상의 현재 역할과 변경 후 역할 모두 user·viewer 여야 한다.
+    _reject_if_admin_exceeds_scope(actor_role, target["role"])
+    if new_role is not None:
+        _reject_if_admin_exceeds_scope(actor_role, new_role)
+    # 자기 자신 정지·강등 방지(실수로 스스로 잠금 방지) → 409.
+    actor_record = users.get_user(actor)
+    if actor_record is not None and actor_record["email"] == target["email"]:
+        if req.active is False:
+            raise HTTPException(status_code=409, detail="자기 자신을 정지할 수 없습니다.")
+        if new_role is not None and users.role_rank(new_role) < users.role_rank(target["role"]):
+            raise HTTPException(status_code=409, detail="자기 자신의 역할을 낮출 수 없습니다.")
+    try:
+        rec = users.update_user(email, password=req.password, role=req.role, active=req.active)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return JSONResponse(rec)
 
 
 @app.get("/{full_path:path}")
