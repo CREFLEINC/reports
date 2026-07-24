@@ -13,8 +13,10 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat as statmod
+import threading
 import time
 import unicodedata
 import uuid
@@ -29,6 +31,11 @@ UPLOADS_DOCS = UPLOADS_DIR / "docs"
 QUEUE_DIR = UPLOADS_DIR / "queue"
 TMP_DIR = UPLOADS_DIR / "tmp"
 AUDIT_LOG = UPLOADS_DIR / "audit.log"
+# 소유자 기록: docs/ 밖의 JSON(서빙 불가). 키=게시 rel(docs/<type>/<name>_v<ver>), 값={owner, ts}.
+# 테스트는 이 전역을 덮어써 임시 파일로 격리한다(uploads_handler.OWNERS_FILE = ...). shares.py 패턴.
+OWNERS_FILE = Path(
+    os.environ.get("REPORTS_OWNERS_FILE", str(UPLOADS_DIR / "owners.json"))
+).resolve()
 
 MAX_UPLOAD = int(os.environ.get("REPORTS_MAX_UPLOAD_MB", "50")) * 1024 * 1024
 PER_FILE_MAX = MAX_UPLOAD                      # zip 내 개별 파일 압축해제 상한
@@ -246,8 +253,54 @@ def _audit(ip: str, uploader: str, doc_type: str, name: str, version: str, sha: 
         fh.write(line + "\n")
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# 소유자 기록 (owners.json, 원자적 쓰기) — shares.py 패턴 재사용.
+# 게시 rel(docs/<type>/<name>_v<ver>) → {owner, ts}. overwrite 소유 검사에 사용한다.
+# ──────────────────────────────────────────────────────────────────────────
+_OWNERS_LOCK = threading.Lock()  # 읽기-수정-쓰기 보호(동기 라우트는 스레드풀 실행)
+
+
+def _read_owners() -> dict:
+    try:
+        with OWNERS_FILE.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError):
+        # 손상 파일은 빈 상태로 취급(서비스 지속) — 다음 쓰기에서 복구된다.
+        return {}
+
+
+def _write_owners(data: dict) -> None:
+    OWNERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OWNERS_FILE.with_name(f".{OWNERS_FILE.name}.{secrets.token_hex(6)}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, OWNERS_FILE)
+
+
+def _get_owner(rel_key: str) -> dict | None:
+    """게시 rel 의 소유 기록({owner, ts}) 또는 None. None 은 owners.json 도입 전 게시분을 뜻한다."""
+    with _OWNERS_LOCK:
+        rec = _read_owners().get(rel_key)
+    return dict(rec) if isinstance(rec, dict) else None
+
+
+def _set_owner(rel_key: str, owner: str) -> None:
+    """게시 rel 의 소유자를 원자적으로 기록(최초 게시자 등록용)."""
+    with _OWNERS_LOCK:
+        data = _read_owners()
+        data[rel_key] = {"owner": owner, "ts": time.time()}
+        _write_owners(data)
+
+
 async def handle_upload(*, file: UploadFile, doc_type: str, name: str, version: str,
-                        client_ip: str, uploader: str, overwrite: bool) -> dict:
+                        client_ip: str, uploader: str, role: str, overwrite: bool) -> dict:
+    """업로드 검증 → 원자적 게시 → 렌더 enqueue → 감사·소유 기록.
+
+    uploader 는 인증 주체(sub: env 계정명 또는 email), role 은 정규화 역할이다. 신규 게시는 항상
+    uploader 를 소유자로 기록하고, overwrite 는 system_admin 이거나 기존 소유자일 때만 허용한다
+    (기록 없는 도입 전 게시분은 system_admin 만). 소유 검사 실패 시 403."""
     _ensure_dirs()
     if shutil.disk_usage(UPLOADS_DIR).free < MIN_FREE_BYTES:
         _bad("서버 디스크 여유가 부족합니다.", 507)
@@ -267,8 +320,16 @@ async def handle_upload(*, file: UploadFile, doc_type: str, name: str, version: 
     dest_dir = (UPLOADS_DOCS / doc_type / f"{name}_v{version}").resolve()
     if not _within(dest_dir, UPLOADS_DOCS):
         _bad("대상 경로가 업로드 범위를 벗어납니다.")
-    if dest_dir.exists() and not overwrite:
-        _bad(f"이미 존재합니다: {doc_type}/{name}_v{version} (버전을 올리거나 덮어쓰기 선택).", 409)
+    rel_key = dest_dir.relative_to(UPLOADS_DIR).as_posix()  # docs/<type>/<name>_v<ver>
+    if dest_dir.exists():
+        if not overwrite:
+            _bad(f"이미 존재합니다: {doc_type}/{name}_v{version} (버전을 올리거나 덮어쓰기 선택).", 409)
+        # overwrite: system_admin 은 전체 허용, 그 외는 본인 소유만. 기록 없는 도입 전 게시분은
+        # system_admin 만 덮어쓸 수 있다(보수적).
+        if role != "system_admin":
+            owner_rec = _get_owner(rel_key)
+            if owner_rec is None or owner_rec.get("owner") != uploader:
+                _bad("이 문서를 덮어쓸 권한이 없습니다(소유자 또는 시스템 관리자만 가능).", 403)
 
     work_id = uuid.uuid4().hex
     stage = TMP_DIR / work_id
@@ -304,9 +365,13 @@ async def handle_upload(*, file: UploadFile, doc_type: str, name: str, version: 
         raw.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"업로드 처리 실패: {e}")
 
-    rel_dir = dest_dir.relative_to(UPLOADS_DIR).as_posix()          # docs/<type>/<name>_v<ver>
     rel_from_base = dest_dir.relative_to(BASE_DIR).as_posix()        # uploads/docs/...
-    _enqueue_render(rel_dir)
+    if _get_owner(rel_key) is None:
+        # 최초 게시자를 소유자로 기록. 이미 소유자가 있으면 overwrite 여도 소유권을 유지한다
+        # (system_admin 이 대신 덮어써도 원 소유자를 빼앗지 않는다). 도입 전 게시분(기록 없음)을
+        # system_admin 이 덮어쓰면 이때 소유권이 확립된다.
+        _set_owner(rel_key, uploader)
+    _enqueue_render(rel_key)
     _audit(client_ip, uploader, doc_type, name, version, sha, rel_from_base)
 
     from urllib.parse import quote
