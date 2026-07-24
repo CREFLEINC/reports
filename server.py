@@ -382,6 +382,7 @@ INDEX_CSS = """
   .upload-link:hover{filter:brightness(.93);}
   .lead{color:var(--muted); margin:16px 0 24px; font-size:.95rem;}
   .filters{display:flex; gap:12px; flex-wrap:wrap; margin:0 0 36px;}
+  .filters[hidden]{display:none;}  /* 작성자 display 가 UA [hidden] 를 이기므로 명시(JS 미실행 폴백) */
   .filters input,.filters select{font:inherit; padding:9px 12px; border:1px solid var(--line);
         border-radius:8px; background:var(--card); color:var(--ink);}
   .filters input{flex:1; min-width:200px;}

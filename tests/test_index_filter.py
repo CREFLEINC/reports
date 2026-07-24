@@ -145,6 +145,9 @@ def test_filter_bar_hidden_until_js():
     html = server.render_index(_sample_docs(), "tester")
     # JS 미실행 시 필터 바가 화면에 안 나타나도록 hidden 으로 렌더.
     assert '<div class="filters" id="doc-filters" hidden>' in html
+    # 작성자 .filters{display:flex} 가 UA [hidden] 를 이기므로, 폴백이 실제로 먹으려면
+    # .filters[hidden]{display:none} 규칙이 렌더 CSS 에 있어야 한다(회귀 방지).
+    assert ".filters[hidden]{display:none;}" in html
     # INDEX_FILTER_JS 는 두 컨트롤을 찾은 뒤 hidden 을 해제한다(정적 확인).
     assert "filters.hidden=false" in html
 
