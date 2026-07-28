@@ -265,3 +265,81 @@ def test_bearer_expired_token_rejected():
     r = client.get("/", headers={"Authorization": f"Bearer {tok}", "accept": "application/json"},
                    follow_redirects=False)
     assert r.status_code == 401
+
+
+# ── HTTP 스펙 정합성: WWW-Authenticate · no-store · 스킴 대소문자 (이슈 #21) ──────
+CHALLENGE = 'Bearer, Basic realm="reports"'
+
+
+def test_www_authenticate_on_index_401():
+    # AC1: 미인증 API(json) 401(verify_identity)에 Bearer/Basic 챌린지 헤더.
+    r = client.get("/", headers={"accept": "application/json"}, follow_redirects=False)
+    assert r.status_code == 401
+    assert r.headers["www-authenticate"] == CHALLENGE
+
+
+def test_www_authenticate_on_upload_401():
+    # AC1: 미인증 /upload API 401(require_can_upload)에 챌린지 헤더.
+    r = client.get("/upload", headers={"accept": "application/json"}, follow_redirects=False)
+    assert r.status_code == 401
+    assert r.headers["www-authenticate"] == CHALLENGE
+
+
+def test_www_authenticate_on_users_api_401():
+    # AC1: 미인증 /api/v1/users 401(require_admin)에 챌린지 헤더.
+    r = client.get("/api/v1/users", headers={"accept": "application/json"}, follow_redirects=False)
+    assert r.status_code == 401
+    assert r.headers["www-authenticate"] == CHALLENGE
+
+
+def test_www_authenticate_on_forged_bearer_401():
+    # AC1: 위조 Bearer 토큰 미인증 401 에도 챌린지 헤더.
+    r = client.get("/", headers={"Authorization": "Bearer not.a.jwt", "accept": "application/json"},
+                   follow_redirects=False)
+    assert r.status_code == 401
+    assert r.headers["www-authenticate"] == CHALLENGE
+
+
+def test_www_authenticate_on_suspended_account_token_401(tmp_path, monkeypatch):
+    # AC1: 정지(active=False) 계정의 기발급 Bearer 토큰 → 401 + 챌린지 헤더.
+    import users
+    monkeypatch.setattr(users, "USERS_FILE", tmp_path / "users.json")
+    users.add_user("susp@x.com", "pw", "user")
+    users.set_active("susp@x.com", False)
+    tok = server._make_token("susp@x.com", "user")
+    r = client.get("/", headers={"Authorization": f"Bearer {tok}", "accept": "application/json"},
+                   follow_redirects=False)
+    assert r.status_code == 401
+    assert r.headers["www-authenticate"] == CHALLENGE
+
+
+def test_no_www_authenticate_on_403():
+    # AC1: 권한 부족 403 은 챌린지가 아니므로 WWW-Authenticate 없음(reader → /upload).
+    c = TestClient(app)
+    c.cookies.set("reports_token", server._make_token("reader", "reader"))
+    r = c.get("/upload", headers={"accept": "application/json"}, follow_redirects=False)
+    assert r.status_code == 403
+    assert "www-authenticate" not in r.headers
+
+
+def test_token_response_has_no_store():
+    # AC2: 토큰 발급 200 응답에 Cache-Control: no-store(RFC 6749 §5.1).
+    r = client.post("/api/v1/auth/token", data={"username": "reader", "password": "readerpass"})
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+
+
+def test_bearer_scheme_case_insensitive():
+    # AC3: 소문자/대문자 'bearer' 스킴도 인증 성공(RFC 7235, 토큰 값 불변).
+    tok = server._make_token("reader", "reader")
+    for scheme in ("bearer", "BEARER", "BeArEr"):
+        r = client.get("/", headers={"Authorization": f"{scheme} {tok}"})
+        assert r.status_code == 200, scheme
+
+
+def test_basic_scheme_case_insensitive():
+    # AC3: 소문자 'basic' 스킴도 자동화 폴백으로 인증 성공(Sec-Fetch 없음).
+    import base64
+    cred = base64.b64encode(b"reader:readerpass").decode()
+    r = client.get("/", headers={"Authorization": f"basic {cred}"})
+    assert r.status_code == 200
