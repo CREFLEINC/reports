@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -57,6 +58,26 @@ def test_copied_source_triggers_rebuild(source: str, var: str) -> None:
         f"{source!r} 가 이미지에 COPY 되는데 deploy.sh 의 {var} 패턴에 없다.\n"
         f"  패턴: {pattern}\n"
         f"  → 이 파일만 바뀐 커밋은 재빌드 없이 마커만 전진해 운영이 낡은 코드로 남는다."
+    )
+
+
+def test_viewer_image_copies_local_modules_imported_by_server() -> None:
+    """server.py 가 import 하는 저장소 모듈은 런타임 이미지에 모두 포함돼야 한다."""
+    tree = ast.parse((ROOT / "server.py").read_text(encoding="utf-8"))
+    imported_modules = {
+        alias.name.split(".", 1)[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    local_modules = {
+        f"{module}.py" for module in imported_modules if (ROOT / f"{module}.py").is_file()
+    }
+    copied_sources = set(copy_sources(ROOT / "Dockerfile"))
+
+    assert local_modules <= copied_sources, (
+        "server.py 가 import 하지만 Dockerfile 이 COPY 하지 않는 로컬 모듈: "
+        f"{sorted(local_modules - copied_sources)}"
     )
 
 
