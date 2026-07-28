@@ -51,6 +51,7 @@ import base64
 import html
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -59,7 +60,8 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from threading import Lock
+from typing import Optional, Union
 from urllib.parse import quote
 
 import jwt
@@ -110,6 +112,16 @@ PUBLIC_BASE_URL = os.environ.get("REPORTS_PUBLIC_BASE_URL", "").rstrip("/")
 SHARE_UNLOCK_COOKIE = "share_unlock"  # 비번 보호 공개의 잠금해제 상태(서명 JWT). Path=/s/<token> 스코프.
 SHARE_UNLOCK_TTL = int(os.environ.get("REPORTS_SHARE_UNLOCK_TTL", str(12 * 3600)))  # 기본 12시간
 
+# 단일 프로세스 내 자격증 실패 추적. 만료 또는 성공 시 해당 버킷을 제거한다.
+_FAILURE_LIMIT = 5
+_LOCKOUT_SECONDS = 60
+_FAILURE_BUCKET_LIMIT = 10_000
+_FailureKey = Union[str, tuple[str, str]]
+_FailureBucket = dict[_FailureKey, tuple[int, float]]
+_AUTH_FAILURES: _FailureBucket = {}
+_SHARE_UNLOCK_FAILURES: _FailureBucket = {}
+_FAILURE_STATE_LOCK = Lock()
+
 # 폴더 경로(서버 기준 상대) → 목차에 표시할 사람이 읽는 섹션 이름
 GROUP_LABELS = {
     "proposals": "제안서 · 데모",
@@ -143,6 +155,91 @@ TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 # ──────────────────────────────────────────────────────────────────────────
 # 인증
 # ──────────────────────────────────────────────────────────────────────────
+def _client_ip(request: Request) -> str:
+    """요청 클라이언트 IP를 반환한다."""
+    return request.client.host if request.client else "?"
+
+
+def _locked_retry_after(
+    failures: _FailureBucket,
+    key: _FailureKey,
+) -> int | None:
+    """해당 버킷의 남은 잠금 초를 반환하고, 만료된 기록은 제거한다."""
+    now = time.monotonic()
+    with _FAILURE_STATE_LOCK:
+        state = failures.get(key)
+        if state is None:
+            return None
+        count, expires_at = state
+        remaining = expires_at - now
+        if remaining <= 0:
+            failures.pop(key, None)
+            return None
+        if count >= _FAILURE_LIMIT:
+            return max(1, math.ceil(remaining))
+    return None
+
+
+def _make_failure_bucket_room(failures: _FailureBucket, now: float) -> None:
+    """만료 항목을 정리하고 상한 도달 시 가장 먼저 만료되는 항목을 축출한다."""
+    if len(failures) < _FAILURE_BUCKET_LIMIT:
+        return
+    expired_keys = [
+        stored_key
+        for stored_key, (_count, expires_at) in failures.items()
+        if expires_at <= now
+    ]
+    for expired_key in expired_keys:
+        failures.pop(expired_key, None)
+    while len(failures) >= _FAILURE_BUCKET_LIMIT:
+        eviction_key = min(
+            failures,
+            key=lambda stored_key: (failures[stored_key][1], repr(stored_key)),
+        )
+        failures.pop(eviction_key)
+
+
+def _record_failure(
+    failures: _FailureBucket,
+    key: _FailureKey,
+) -> int | None:
+    """실패를 기록하고 임계값에 도달하면 잠금 초를 반환한다."""
+    now = time.monotonic()
+    with _FAILURE_STATE_LOCK:
+        state = failures.get(key)
+        if state is None:
+            count = 0
+            _make_failure_bucket_room(failures, now)
+        else:
+            count, expires_at = state
+            if expires_at <= now:
+                failures.pop(key, None)
+                count = 0
+                _make_failure_bucket_room(failures, now)
+            elif count >= _FAILURE_LIMIT:
+                return max(1, math.ceil(expires_at - now))
+        count += 1
+        failures[key] = (count, now + _LOCKOUT_SECONDS)
+        if count >= _FAILURE_LIMIT:
+            return _LOCKOUT_SECONDS
+    return None
+
+
+def _reset_failures(failures: _FailureBucket, key: _FailureKey) -> None:
+    """성공한 자격증 버킷의 실패 기록을 초기화한다."""
+    with _FAILURE_STATE_LOCK:
+        failures.pop(key, None)
+
+
+def _rate_limit_error(retry_after: int) -> HTTPException:
+    """Retry-After를 포함한 429 응답 예외를 반환한다."""
+    return HTTPException(
+        status_code=429,
+        detail="너무 많은 실패 시도가 있었습니다. 잠시 후 다시 시도해 주세요.",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 def _eq(a: str, b: str) -> bool:
     """상수시간 문자열 비교(UTF-8)."""
     return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
@@ -1441,15 +1538,27 @@ async def api_v1_documents_create(
 
 
 @app.post("/api/v1/auth/token")
-def api_v1_auth_token(username: str = Form(...), password: str = Form(...)) -> JSONResponse:
+def api_v1_auth_token(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+) -> JSONResponse:
     """토큰 발급 API — form 자격증명(username/password) 검증 후 Bearer 용 JWT 발급.
 
     성공 시 {"access_token": <JWT>, "token_type": "Bearer", "expires_in": TOKEN_TTL}.
     토큰은 쿠키 세션과 동일한 _make_token(sub/role/iat/exp) 을 재사용한다(신규 클레임 없음).
     자격증명 오류는 401 — 계정 존재 여부 힌트를 노출하지 않는다."""
+    client_ip = _client_ip(request)
+    retry_after = _locked_retry_after(_AUTH_FAILURES, client_ip)
+    if retry_after is not None:
+        raise _rate_limit_error(retry_after)
     role = _role_for_credentials(username, password)
     if not role:
+        retry_after = _record_failure(_AUTH_FAILURES, client_ip)
+        if retry_after is not None:
+            raise _rate_limit_error(retry_after)
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+    _reset_failures(_AUTH_FAILURES, client_ip)
     # RFC 6749 §5.1 — access_token 을 담은 응답은 캐시 금지(no-store + Pragma 병기).
     return JSONResponse(
         {
@@ -1469,14 +1578,27 @@ def login_form(request: Request, next: str = "/", loggedout: int = 0) -> Respons
 
 
 @app.post("/login")
-def login_submit(username: str = Form(...), password: str = Form(...), next: str = Form("/")) -> Response:
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+) -> Response:
     target = _safe_next(next)
+    client_ip = _client_ip(request)
+    retry_after = _locked_retry_after(_AUTH_FAILURES, client_ip)
+    if retry_after is not None:
+        raise _rate_limit_error(retry_after)
     role = _role_for_credentials(username, password)
     if not role:
+        retry_after = _record_failure(_AUTH_FAILURES, client_ip)
+        if retry_after is not None:
+            raise _rate_limit_error(retry_after)
         return HTMLResponse(
             render_login_form(error="아이디 또는 비밀번호가 올바르지 않습니다.", next_url=target),
             status_code=401,
         )
+    _reset_failures(_AUTH_FAILURES, client_ip)
     resp = RedirectResponse(target, status_code=303)
     resp.set_cookie(
         COOKIE_NAME, _make_token(username, role),
@@ -1562,15 +1684,23 @@ def share_landing(token: str, request: Request) -> Response:
 
 
 @app.post("/s/{token}/unlock")
-def share_unlock(token: str, password: str = Form(...)) -> Response:
+def share_unlock(token: str, request: Request, password: str = Form(...)) -> Response:
     rec = shares.get_share(token)
     if not rec:
         return HTMLResponse(render_share_gone(), status_code=404)
     if not rec["has_password"]:
         return RedirectResponse(f"/s/{token}", status_code=303)
+    failure_key = (_client_ip(request), token)
+    retry_after = _locked_retry_after(_SHARE_UNLOCK_FAILURES, failure_key)
+    if retry_after is not None:
+        raise _rate_limit_error(retry_after)
     if not shares.verify_password(password, rec.get("pw_salt") or "", rec.get("pw_hash") or ""):
+        retry_after = _record_failure(_SHARE_UNLOCK_FAILURES, failure_key)
+        if retry_after is not None:
+            raise _rate_limit_error(retry_after)
         return HTMLResponse(render_share_password(token, error="비밀번호가 올바르지 않습니다."),
                             status_code=401)
+    _reset_failures(_SHARE_UNLOCK_FAILURES, failure_key)
     resp = RedirectResponse(f"/s/{token}", status_code=303)
     resp.set_cookie(SHARE_UNLOCK_COOKIE, _make_unlock_token(token), max_age=SHARE_UNLOCK_TTL,
                     httponly=True, samesite="lax", secure=COOKIE_SECURE, path=f"/s/{token}")
