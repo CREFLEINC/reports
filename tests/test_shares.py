@@ -38,12 +38,16 @@ def _expiry(days: int = 30) -> str:
 
 
 @pytest.fixture(autouse=True)
-def _clean_shares(monkeypatch):
-    monkeypatch.setattr(server, "_AUTH_FAILURES", {}, raising=False)
-    monkeypatch.setattr(server, "_SHARE_UNLOCK_FAILURES", {}, raising=False)
+def _clean_shares():
+    with server._FAILURE_STATE_LOCK:
+        server._AUTH_FAILURES.clear()
+        server._SHARE_UNLOCK_FAILURES.clear()
     shares.SHARES_FILE.parent.mkdir(parents=True, exist_ok=True)
     shares._write_raw({})
     yield
+    with server._FAILURE_STATE_LOCK:
+        server._AUTH_FAILURES.clear()
+        server._SHARE_UNLOCK_FAILURES.clear()
     shares.SHARES_FILE.unlink(missing_ok=True)
 
 
@@ -345,20 +349,41 @@ def test_partial_share_failures_expire_after_sixty_idle_seconds(monkeypatch):
     assert after_expiry.status_code == 401
 
 
-def test_share_failure_bucket_evicts_earliest_expiring_key_at_capacity(monkeypatch):
+def test_share_failure_bucket_fails_closed_without_evicting_active_entries(monkeypatch):
     now = [1200.0]
     monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 3, raising=False)
     token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
 
-    for suffix in range(1, 5):
+    victim = TestClient(app, client=("203.0.113.1", 50000))
+    for _ in range(5):
+        victim.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+    now[0] = 1201.0
+    for suffix in (2, 3):
         c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
         failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
         assert failed.status_code == 401
-        now[0] += 1
+
+    before_churn = dict(server._SHARE_UNLOCK_FAILURES)
+    now[0] = 1202.0
+    for suffix in (4, 5, 6):
+        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        saturated = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert saturated.status_code == 429
+        assert saturated.headers["retry-after"] == "58"
 
     assert len(server._SHARE_UNLOCK_FAILURES) == 3
-    assert ("203.0.113.1", token) not in server._SHARE_UNLOCK_FAILURES
+    assert server._SHARE_UNLOCK_FAILURES == before_churn
+    valid_new_key = TestClient(app, client=("203.0.113.7", 50000)).post(
+        f"/s/{token}/unlock",
+        data={"password": "s3cret"},
+        follow_redirects=False,
+    )
+    assert valid_new_key.status_code == 429
+    assert valid_new_key.headers["retry-after"] == "58"
+    assert server._SHARE_UNLOCK_FAILURES == before_churn
+    locked = victim.post(f"/s/{token}/unlock", data={"password": "s3cret"})
+    assert locked.status_code == 429
 
 
 # ── 통합: 만료 / 해제 ────────────────────────────────────────────────────────
