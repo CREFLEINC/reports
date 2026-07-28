@@ -18,6 +18,17 @@ from server import app
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_auth_failure_state():
+    with server._FAILURE_STATE_LOCK:
+        server._AUTH_FAILURES.clear()
+        server._SHARE_UNLOCK_FAILURES.clear()
+    yield
+    with server._FAILURE_STATE_LOCK:
+        server._AUTH_FAILURES.clear()
+        server._SHARE_UNLOCK_FAILURES.clear()
+
+
 def test_healthz_no_auth():
     assert client.get("/healthz").status_code == 200
 
@@ -241,6 +252,229 @@ def test_token_endpoint_wrong_credentials_401():
     body = r.json()
     assert "access_token" not in body
     assert "detail" in body
+
+
+# ── 자격증 실패 시도 제한 (이슈 #22) ───────────────────────────
+def test_login_and_token_failures_share_ip_bucket(monkeypatch):
+    now = 100.0
+    monkeypatch.setattr(server.time, "monotonic", lambda: now)
+    c = TestClient(app, client=("198.51.100.10", 50000))
+
+    for path in ("/login", "/api/v1/auth/token", "/login", "/api/v1/auth/token"):
+        r = c.post(path, data={"username": "reader", "password": "WRONG", "next": "/"})
+        assert r.status_code == 401
+
+    locked = c.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    )
+    assert locked.status_code == 429
+    assert locked.headers["retry-after"] == "60"
+
+
+def test_locked_auth_rejects_valid_credentials_with_remaining_seconds(monkeypatch):
+    now = [200.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    c = TestClient(app, client=("198.51.100.11", 50000))
+
+    for _ in range(5):
+        c.post("/api/v1/auth/token", data={"username": "reader", "password": "WRONG"})
+
+    now[0] = 201.2
+    locked = c.post(
+        "/login",
+        data={"username": "reader", "password": "readerpass", "next": "/"},
+    )
+    assert locked.status_code == 429
+    assert locked.headers["retry-after"] == "59"
+
+
+def test_auth_lock_expires_and_success_resets_failures(monkeypatch):
+    now = [300.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    c = TestClient(app, client=("198.51.100.12", 50000))
+
+    for _ in range(4):
+        failed = c.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+        assert failed.status_code == 401
+    success = c.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert success.status_code == 200
+
+    for _ in range(4):
+        failed = c.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+        assert failed.status_code == 401
+
+    locked = c.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "WRONG"},
+    )
+    assert locked.status_code == 429
+
+    now[0] = 360.0
+    after_expiry = c.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert after_expiry.status_code == 200
+
+
+def test_auth_failure_buckets_are_isolated_by_ip(monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 400.0)
+    locked_client = TestClient(app, client=("198.51.100.13", 50000))
+    other_client = TestClient(app, client=("198.51.100.14", 50000))
+
+    for _ in range(5):
+        locked_client.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+
+    success = other_client.post(
+        "/login",
+        data={"username": "reader", "password": "readerpass", "next": "/"},
+        follow_redirects=False,
+    )
+    assert success.status_code == 303
+
+
+def test_success_for_one_username_does_not_reset_another_username(monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 850.0)
+    c = TestClient(app, client=("198.51.100.16", 50000))
+
+    for path in ("/login", "/api/v1/auth/token", "/login", "/api/v1/auth/token"):
+        failed = c.post(
+            path,
+            data={"username": "uploader", "password": "WRONG", "next": "/"},
+        )
+        assert failed.status_code == 401
+
+    reader_success = c.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert reader_success.status_code == 200
+
+    uploader_locked = c.post(
+        "/login",
+        data={"username": "uploader", "password": "WRONG", "next": "/"},
+    )
+    assert uploader_locked.status_code == 429
+
+
+def test_partial_auth_failures_expire_after_sixty_idle_seconds(monkeypatch):
+    now = [900.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    c = TestClient(app, client=("198.51.100.15", 50000))
+
+    for _ in range(4):
+        failed = c.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+        assert failed.status_code == 401
+
+    now[0] = 960.0
+    after_expiry = c.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "WRONG"},
+    )
+    assert after_expiry.status_code == 401
+
+
+def test_auth_failure_bucket_fails_closed_without_evicting_active_entries(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 3, raising=False)
+
+    victim = TestClient(app, client=("198.51.100.1", 50000))
+    for _ in range(5):
+        victim.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+    now[0] = 1001.0
+    for suffix in (2, 3):
+        c = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        assert c.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        ).status_code == 401
+
+    before_churn = dict(server._AUTH_FAILURES)
+    now[0] = 1002.0
+    for suffix in (4, 5, 6):
+        c = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        saturated = c.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+        assert saturated.status_code == 429
+        assert saturated.headers["retry-after"] == "58"
+
+    assert len(server._AUTH_FAILURES) == 3
+    assert server._AUTH_FAILURES == before_churn
+    valid_new_key = TestClient(app, client=("198.51.100.7", 50000)).post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert valid_new_key.status_code == 429
+    assert valid_new_key.headers["retry-after"] == "58"
+    assert server._AUTH_FAILURES == before_churn
+    locked = victim.post(
+        "/login",
+        data={"username": "reader", "password": "readerpass", "next": "/"},
+    )
+    assert locked.status_code == 429
+
+
+def test_auth_failure_bucket_refreshes_order_before_pruning(monkeypatch):
+    now = [1300.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 2, raising=False)
+    first = TestClient(app, client=("198.51.100.21", 50000))
+    second = TestClient(app, client=("198.51.100.22", 50000))
+    newcomer = TestClient(app, client=("198.51.100.23", 50000))
+
+    assert first.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    ).status_code == 401
+    now[0] = 1301.0
+    assert second.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    ).status_code == 401
+    now[0] = 1302.0
+    assert first.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    ).status_code == 401
+
+    now[0] = 1303.0
+    saturated = newcomer.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    )
+    assert saturated.status_code == 429
+    assert saturated.headers["retry-after"] == "58"
+
+    now[0] = 1361.0
+    accepted = newcomer.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    )
+    assert accepted.status_code == 401
+    assert ("198.51.100.21", "reader") in server._AUTH_FAILURES
+    assert ("198.51.100.22", "reader") not in server._AUTH_FAILURES
 
 
 def test_bearer_token_grants_read():

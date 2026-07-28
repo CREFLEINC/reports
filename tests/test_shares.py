@@ -39,9 +39,15 @@ def _expiry(days: int = 30) -> str:
 
 @pytest.fixture(autouse=True)
 def _clean_shares():
+    with server._FAILURE_STATE_LOCK:
+        server._AUTH_FAILURES.clear()
+        server._SHARE_UNLOCK_FAILURES.clear()
     shares.SHARES_FILE.parent.mkdir(parents=True, exist_ok=True)
     shares._write_raw({})
     yield
+    with server._FAILURE_STATE_LOCK:
+        server._AUTH_FAILURES.clear()
+        server._SHARE_UNLOCK_FAILURES.clear()
     shares.SHARES_FILE.unlink(missing_ok=True)
 
 
@@ -232,6 +238,152 @@ def test_password_protected_flow():
     assert "share_unlock=" in ok.headers.get("set-cookie", "")
     assert c.get(f"/s/{tok}/view/").status_code == 200
     assert c.get(f"/s/{tok}/pdf").status_code == 200
+
+
+def test_share_unlock_locks_on_fifth_failure_and_rejects_valid_password(monkeypatch):
+    now = [500.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
+    c = TestClient(app, client=("203.0.113.10", 50000))
+
+    for _ in range(4):
+        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert failed.status_code == 401
+
+    locked = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+    assert locked.status_code == 429
+    assert locked.headers["retry-after"] == "60"
+
+    now[0] = 501.2
+    valid = c.post(f"/s/{token}/unlock", data={"password": "s3cret"})
+    assert valid.status_code == 429
+    assert valid.headers["retry-after"] == "59"
+
+
+def test_share_unlock_failure_buckets_are_isolated_by_ip_and_token(monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 600.0)
+    doc_rel = _docs_with_pdf()[0]["rel"]
+    first_token = _create_share(doc_rel, password="first-pass")["token"]
+    second_token = _create_share(doc_rel, password="second-pass")["token"]
+    locked_client = TestClient(app, client=("203.0.113.11", 50000))
+    other_client = TestClient(app, client=("203.0.113.12", 50000))
+
+    for _ in range(5):
+        locked_client.post(f"/s/{first_token}/unlock", data={"password": "WRONG"})
+
+    same_ip_other_share = locked_client.post(
+        f"/s/{second_token}/unlock",
+        data={"password": "second-pass"},
+        follow_redirects=False,
+    )
+    other_ip_same_share = other_client.post(
+        f"/s/{first_token}/unlock",
+        data={"password": "first-pass"},
+        follow_redirects=False,
+    )
+    assert same_ip_other_share.status_code == 303
+    assert other_ip_same_share.status_code == 303
+
+
+def test_share_unlock_lock_expires_and_success_resets_failures(monkeypatch):
+    now = [700.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
+    c = TestClient(app, client=("203.0.113.13", 50000))
+
+    for _ in range(4):
+        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert failed.status_code == 401
+    success = c.post(
+        f"/s/{token}/unlock",
+        data={"password": "s3cret"},
+        follow_redirects=False,
+    )
+    assert success.status_code == 303
+
+    for _ in range(4):
+        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert failed.status_code == 401
+
+    locked = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+    assert locked.status_code == 429
+
+    now[0] = 760.0
+    after_expiry = c.post(
+        f"/s/{token}/unlock",
+        data={"password": "s3cret"},
+        follow_redirects=False,
+    )
+    assert after_expiry.status_code == 303
+
+
+def test_share_unlock_rate_limit_skips_missing_and_unprotected_shares(monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 800.0)
+    c = TestClient(app, client=("203.0.113.14", 50000))
+
+    for _ in range(6):
+        assert c.post("/s/missing/unlock", data={"password": "WRONG"}).status_code == 404
+
+    token = _create_share(_docs_with_pdf()[0]["rel"])["token"]
+    for _ in range(6):
+        response = c.post(
+            f"/s/{token}/unlock",
+            data={"password": "anything"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+
+def test_partial_share_failures_expire_after_sixty_idle_seconds(monkeypatch):
+    now = [1100.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
+    c = TestClient(app, client=("203.0.113.15", 50000))
+
+    for _ in range(4):
+        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert failed.status_code == 401
+
+    now[0] = 1160.0
+    after_expiry = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+    assert after_expiry.status_code == 401
+
+
+def test_share_failure_bucket_fails_closed_without_evicting_active_entries(monkeypatch):
+    now = [1200.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 3, raising=False)
+    token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
+
+    victim = TestClient(app, client=("203.0.113.1", 50000))
+    for _ in range(5):
+        victim.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+    now[0] = 1201.0
+    for suffix in (2, 3):
+        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert failed.status_code == 401
+
+    before_churn = dict(server._SHARE_UNLOCK_FAILURES)
+    now[0] = 1202.0
+    for suffix in (4, 5, 6):
+        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        saturated = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert saturated.status_code == 429
+        assert saturated.headers["retry-after"] == "58"
+
+    assert len(server._SHARE_UNLOCK_FAILURES) == 3
+    assert server._SHARE_UNLOCK_FAILURES == before_churn
+    valid_new_key = TestClient(app, client=("203.0.113.7", 50000)).post(
+        f"/s/{token}/unlock",
+        data={"password": "s3cret"},
+        follow_redirects=False,
+    )
+    assert valid_new_key.status_code == 429
+    assert valid_new_key.headers["retry-after"] == "58"
+    assert server._SHARE_UNLOCK_FAILURES == before_churn
+    locked = victim.post(f"/s/{token}/unlock", data={"password": "s3cret"})
+    assert locked.status_code == 429
 
 
 # ── 통합: 만료 / 해제 ────────────────────────────────────────────────────────
