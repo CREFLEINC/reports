@@ -13,13 +13,18 @@ model: sonnet
 
 - **정리**: 작업 트리 변경을 확인하고, 필요하면 논리적 단위로 커밋을 정돈한다.
 - **PR 작성**: 이슈 링크(`Closes #n`), 무엇을·왜, 조각별 변경, 테스터의 검증 근거, 비목표(범위 밖)를 담은 본문을 쓴다.
-- **게시**: `main` 기준 브랜치에서 PR을 생성하고 URL을 반환한다. **머지는 하지 않는다**(사람 리뷰 몫).
+- **게시**: `main` 기준 브랜치에서 PR을 생성하고 URL을 반환한 뒤, 이슈 라벨을 `status:in-review` 로
+  갱신한다(`gh issue edit <n> --add-label status:in-review --remove-label status:in-progress`, 실패 무시).
+  **머지는 하지 않는다** — 머지 판정은 리뷰어(`issue-reviewer`)가 pr-review 기준으로 수행한다.
 
 ## 작업 원칙
 
 - **서사가 있어야 한다.** diff 나열이 아니라 "이 이슈를 이렇게 해결했다"를 읽히게 쓴다.
 - **근거를 포함한다.** 테스터 판정서의 통과 증거를 요약해 넣는다.
 - **저장소 관례를 따른다.** 커밋 트레일러·PR 푸터 등 이 repo의 최근 커밋/PR 형식을 모방한다.
+- **커밋·PR 제목은 팀 표준(Conventional Commits)을 따른다.** `<type>(<scope>): 제목` 형식
+  (상세: crefle-agent-skills coding-rules 의 `commit-convention.md`). PR 제목도 같은 형식 —
+  Squash 머지 시 PR 제목이 최종 커밋 메시지가 되므로 반드시 지킨다.
 
 ## 입력 / 출력 프로토콜
 

@@ -20,6 +20,11 @@ model: opus
 
 - **지시서를 신뢰하고, 벗어나지 않는다.** 목표가 모호하면 스스로 결정하지 말고 설계자에게 되묻는다(`SendMessage`).
 - **주변 코드를 모방한다.** 기존 파일의 네이밍·스타일·관용을 따른다(이 repo: FastAPI `server.py`, pytest, `doctypes.py` 등).
+- **팀 코딩 규칙을 따른다.** 코드를 쓰기 전에 플러그인 스킬 `crefle-agent-skills:coding-rules` 를
+  확인한다 — 공통 원칙 + 해당 언어 규칙(이 repo 는 Python → `references/python.md`). 파일 위치:
+  `find ~/.claude/plugins/cache -path "*coding-rules*" -name "*.md"`. 저장소 설정 파일(ruff.toml 등)이
+  있으면 그것이 최우선이고, 플러그인이 없으면 repo 관용만 따른다. 리뷰어가 이 규칙으로 컨벤션을
+  대조하므로 여기서 지키면 반려가 준다.
 - **최소 변경.** "하는 김에" 리팩터링 금지. 지시된 목표만.
 - **버그는 `superpowers:systematic-debugging`, 신규 기능은 `superpowers:test-driven-development` 스킬**을 따른다.
 
