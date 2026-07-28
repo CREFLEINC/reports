@@ -209,12 +209,16 @@ def _identify(request: Request) -> tuple[str, str] | None:
             ident = _resolve_identity(str(payload.get("sub", "")), payload.get("role", ""))
             if ident:
                 return ident
+    # 인증 스킴은 RFC 7235 상 대소문자 무구분 → 스킴 부분만 소문자로 비교(bearer/BEARER 허용).
+    # 스킴 뒤 공백 1개로 파라미터를 분리하고 토큰 값 자체는 변경하지 않는다.
+    auth = request.headers.get("Authorization", "")
+    scheme, _sep, param = auth.partition(" ")
+    scheme = scheme.lower()
     # Bearer 토큰: REST API 클라이언트가 POST /api/v1/auth/token 으로 발급받은 JWT.
     # 브라우저는 Bearer 를 자발적으로 보내지 않으므로(캐시된 Basic 자격증명 문제와 무관)
     # _is_browser 게이트 앞에서 인정한다.
-    bearer = request.headers.get("Authorization", "")
-    if bearer.startswith("Bearer "):
-        payload = _decode_token(bearer[7:])
+    if scheme == "bearer":
+        payload = _decode_token(param)
         if payload:
             ident = _resolve_identity(str(payload.get("sub", "")), payload.get("role", ""))
             if ident:
@@ -223,10 +227,9 @@ def _identify(request: Request) -> tuple[str, str] | None:
     # 구 시스템의 캐시된 Basic 자격증명이 로그아웃을 무력화하지 못하게 하기 위함.
     if _is_browser(request):
         return None
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Basic "):
+    if scheme == "basic":
         try:
-            raw = base64.b64decode(auth[6:]).decode("utf-8")
+            raw = base64.b64decode(param).decode("utf-8")
         except Exception:  # noqa: BLE001 — 잘못된 base64 → 미인증
             return None
         user, sep, pwd = raw.partition(":")
@@ -256,6 +259,19 @@ class NeedsLogin(Exception):
         self.next_url = next_url
 
 
+# 보호 리소스 401 챌린지 헤더값(RFC 7235). Bearer 우선 + 자동화 Basic 폴백 병기.
+WWW_AUTHENTICATE = 'Bearer, Basic realm="reports"'
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    """WWW-Authenticate 챌린지 헤더를 붙인 401(RFC 6750 §3·RFC 7617). 챌린지 기반으로
+    동작하는 비-preemptive HTTP 클라이언트가 자동 재인증할 수 있게, 보호 리소스의 미인증
+    401 은 이 헬퍼로 생성한다(권한 부족 403 은 챌린지가 아니므로 붙이지 않는다)."""
+    return HTTPException(
+        status_code=401, detail=detail, headers={"WWW-Authenticate": WWW_AUTHENTICATE}
+    )
+
+
 def verify_identity(request: Request) -> tuple[str, str]:
     """읽기 인증 + 역할: (user, role). 미인증 브라우저는 /login 리다이렉트."""
     ident = _identify(request)
@@ -263,7 +279,7 @@ def verify_identity(request: Request) -> tuple[str, str]:
         return ident
     if _wants_html(request):
         raise NeedsLogin(request.url.path)
-    raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+    raise _unauthorized("인증이 필요합니다.")
 
 
 def verify(request: Request) -> str:
@@ -284,7 +300,7 @@ def require_can_upload(request: Request) -> tuple[str, str]:
     if ident is None:
         if _wants_html(request):
             raise NeedsLogin(request.url.path)
-        raise HTTPException(status_code=401, detail="업로드 인증이 필요합니다.")
+        raise _unauthorized("업로드 인증이 필요합니다.")
     raise HTTPException(status_code=403, detail="업로드 권한이 없습니다.")
 
 
@@ -300,7 +316,7 @@ def require_system_admin(request: Request) -> str:
     if ident is None:
         if _wants_html(request):
             raise NeedsLogin(request.url.path)
-        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+        raise _unauthorized("인증이 필요합니다.")
     raise HTTPException(status_code=403, detail="권한이 없습니다.")
 
 
@@ -315,7 +331,7 @@ def require_admin(request: Request) -> tuple[str, str]:
     if ident is None:
         if _wants_html(request):
             raise NeedsLogin(request.url.path)
-        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+        raise _unauthorized("인증이 필요합니다.")
     raise HTTPException(status_code=403, detail="사용자 관리 권한이 없습니다.")
 
 
@@ -1434,11 +1450,15 @@ def api_v1_auth_token(username: str = Form(...), password: str = Form(...)) -> J
     role = _role_for_credentials(username, password)
     if not role:
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
-    return JSONResponse({
-        "access_token": _make_token(username, role),
-        "token_type": "Bearer",
-        "expires_in": TOKEN_TTL,
-    })
+    # RFC 6749 §5.1 — access_token 을 담은 응답은 캐시 금지(no-store + Pragma 병기).
+    return JSONResponse(
+        {
+            "access_token": _make_token(username, role),
+            "token_type": "Bearer",
+            "expires_in": TOKEN_TTL,
+        },
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
 
 
 @app.get("/login")
