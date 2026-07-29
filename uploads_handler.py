@@ -149,7 +149,7 @@ async def _stream_to(file: UploadFile, dest: Path) -> str:
 
 
 def _extract_zip_safe(zip_path: Path, stage: Path) -> None:
-    """zip 을 stage 로 안전 추출(extractall 미사용). zip-slip/bomb/symlink/확장자 방어."""
+    """zip 을 stage 로 안전 추출(extractall 미사용). zip-slip/bomb/symlink 방어."""
     stage.mkdir(parents=True, exist_ok=True)
     total = 0
     wrote_any = False
@@ -163,29 +163,28 @@ def _extract_zip_safe(zip_path: Path, stage: Path) -> None:
             _bad(f"zip 항목 수({len(infos)})가 상한({MAX_ENTRIES})을 초과합니다.")
         for zi in infos:
             nm = zi.filename
-            if nm.endswith("/"):
-                continue  # 디렉터리 엔트리는 필요 시 자동 생성
             if "\x00" in nm or nm.startswith("/") or nm.startswith("\\") or "\\" in nm or ":" in nm:
                 _bad("zip 멤버 경로가 안전하지 않습니다(절대경로/구분자).")
             if ".." in Path(nm).parts:
                 _bad("zip 멤버에 상위경로(..)가 있습니다.")
-            # traversal 검사 뒤에 정크 스킵 — 악의적 ..는 위에서 이미 거부됨(보안 회귀 방지).
-            # 탐색기 메타데이터(__MACOSX/.DS_Store/._*/Thumbs.db)는 추출하지 않고 건너뛴다.
-            if _is_junk_member(nm):
-                continue
             mode = (zi.external_attr >> 16) & 0xFFFF
             if statmod.S_ISLNK(mode):
                 _bad("zip 내 심볼릭링크는 허용되지 않습니다.")
+            target = (stage / nm).resolve()
+            if not _within(target, stage):
+                _bad("zip-slip 차단: 추출 경로가 범위를 벗어납니다.")
+            if nm.endswith("/"):
+                continue  # 디렉터리 엔트리는 필요 시 자동 생성
+            # 구조·보안 검사 뒤에 정크와 비허용 파일을 스킵한다. 게시 대상만 디스크에 쓴다.
+            if _is_junk_member(nm):
+                continue
             ext = Path(nm).suffix.lower()
             if ext not in ALLOWED_EXT:
-                _bad(f"허용되지 않는 확장자: {ext or '(없음)'} ({nm})")
+                continue
             if zi.file_size > PER_FILE_MAX:
                 _bad(f"zip 내 파일이 너무 큽니다: {nm}")
             if zi.compress_size > 0 and zi.file_size / zi.compress_size > MAX_RATIO:
                 _bad(f"압축비가 비정상적으로 높습니다(zip-bomb 의심): {nm}")
-            target = (stage / nm).resolve()
-            if not _within(target, stage):
-                _bad("zip-slip 차단: 추출 경로가 범위를 벗어납니다.")
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(zi) as src, target.open("wb") as out:
                 while True:
@@ -198,7 +197,7 @@ def _extract_zip_safe(zip_path: Path, stage: Path) -> None:
                     out.write(chunk)
             wrote_any = True
     if not wrote_any:
-        _bad("zip 에 게시할 콘텐츠가 없습니다(메타데이터만 포함).")
+        _bad("zip 에 게시할 콘텐츠가 없습니다(허용 파일 없음).")
 
 
 def _flatten_single_root(stage: Path, max_depth: int = 64) -> None:
