@@ -422,18 +422,39 @@ def test_auth_failure_bucket_fails_closed_without_evicting_active_entries(monkey
 
     assert len(server._AUTH_FAILURES) == 3
     assert server._AUTH_FAILURES == before_churn
-    valid_new_key = TestClient(app, client=("198.51.100.7", 50000)).post(
-        "/api/v1/auth/token",
-        data={"username": "reader", "password": "readerpass"},
-    )
-    assert valid_new_key.status_code == 429
-    assert valid_new_key.headers["retry-after"] == "58"
-    assert server._AUTH_FAILURES == before_churn
     locked = victim.post(
         "/login",
         data={"username": "reader", "password": "readerpass", "next": "/"},
     )
     assert locked.status_code == 429
+
+
+def test_saturated_auth_bucket_allows_valid_login_and_token(monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 1100.0)
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 3, raising=False)
+
+    for suffix in (1, 2, 3):
+        c = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        failed = c.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+        assert failed.status_code == 401
+
+    before_success = dict(server._AUTH_FAILURES)
+    valid_login = TestClient(app, client=("198.51.100.7", 50000)).post(
+        "/login",
+        data={"username": "reader", "password": "readerpass", "next": "/"},
+        follow_redirects=False,
+    )
+    assert valid_login.status_code == 303
+    assert server._AUTH_FAILURES == before_success
+    valid_token = TestClient(app, client=("198.51.100.8", 50000)).post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert valid_token.status_code == 200
+    assert server._AUTH_FAILURES == before_success
 
 
 def test_auth_failure_bucket_refreshes_order_before_pruning(monkeypatch):

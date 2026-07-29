@@ -179,16 +179,12 @@ def _locked_retry_after(
     failures: _FailureBucket,
     key: _FailureKey,
 ) -> int | None:
-    """해당 버킷의 잠금 또는 포화 시 남은 초를 반환한다."""
+    """해당 키가 잠겨 있으면 남은 초를 반환한다."""
     now = time.monotonic()
     with _FAILURE_STATE_LOCK:
         _prune_expired_failures(failures, now)
         state = failures.get(key)
         if state is None:
-            if len(failures) >= _FAILURE_BUCKET_LIMIT:
-                oldest_key = next(iter(failures))
-                _count, earliest_expiry = failures[oldest_key]
-                return max(1, math.ceil(earliest_expiry - now))
             return None
         count, expires_at = state
         remaining = expires_at - now
@@ -1550,7 +1546,7 @@ def api_v1_auth_token(
     성공 시 {"access_token": <JWT>, "token_type": "Bearer", "expires_in": TOKEN_TTL}.
     토큰은 쿠키 세션과 동일한 _make_token(sub/role/iat/exp) 을 재사용한다(신규 클레임 없음).
     자격증명 오류는 401 — 계정 존재 여부 힌트를 노출하지 않는다. 5회째 실패와
-    잠금·버킷 포화 중에는 429와 남은 정수 초 `Retry-After`를 반환한다."""
+    잠금 중 또는 포화 버킷의 신규 실패에는 429와 남은 정수 초 `Retry-After`를 반환한다."""
     failure_key = _auth_failure_key(request, username)
     retry_after = _locked_retry_after(_AUTH_FAILURES, failure_key)
     if retry_after is not None:

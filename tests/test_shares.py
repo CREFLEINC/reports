@@ -374,16 +374,28 @@ def test_share_failure_bucket_fails_closed_without_evicting_active_entries(monke
 
     assert len(server._SHARE_UNLOCK_FAILURES) == 3
     assert server._SHARE_UNLOCK_FAILURES == before_churn
+    locked = victim.post(f"/s/{token}/unlock", data={"password": "s3cret"})
+    assert locked.status_code == 429
+
+
+def test_saturated_share_bucket_allows_valid_password(monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 1250.0)
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 3, raising=False)
+    token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
+
+    for suffix in (1, 2, 3):
+        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        assert failed.status_code == 401
+
+    before_success = dict(server._SHARE_UNLOCK_FAILURES)
     valid_new_key = TestClient(app, client=("203.0.113.7", 50000)).post(
         f"/s/{token}/unlock",
         data={"password": "s3cret"},
         follow_redirects=False,
     )
-    assert valid_new_key.status_code == 429
-    assert valid_new_key.headers["retry-after"] == "58"
-    assert server._SHARE_UNLOCK_FAILURES == before_churn
-    locked = victim.post(f"/s/{token}/unlock", data={"password": "s3cret"})
-    assert locked.status_code == 429
+    assert valid_new_key.status_code == 303
+    assert server._SHARE_UNLOCK_FAILURES == before_success
 
 
 # ── 통합: 만료 / 해제 ────────────────────────────────────────────────────────
