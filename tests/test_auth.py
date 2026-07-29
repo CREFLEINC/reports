@@ -7,7 +7,6 @@ os.environ["REPORTS_PASS"] = "readerpass"
 os.environ["REPORTS_UPLOAD_USER"] = "uploader"
 os.environ["REPORTS_UPLOAD_PASS"] = "uploaderpass"
 os.environ["REPORTS_SECRET_KEY"] = "test-secret-deadbeef-0123456789abcdef"
-os.environ.pop("REPORTS_API_TOKEN_TTL", None)
 
 import jwt
 import pytest
@@ -239,13 +238,13 @@ def test_token_endpoint_issues_uploader_jwt():
     assert r.status_code == 200
     body = r.json()
     assert body["token_type"] == "Bearer"
-    assert body["expires_in"] == 86400
+    assert body["expires_in"] == server.API_TOKEN_TTL
     payload = server._decode_token(body["access_token"])
     assert payload is not None
     assert set(payload) == {"sub", "role", "iat", "exp"}
     assert payload["sub"] == "uploader"
     assert payload["role"] == "uploader"
-    assert payload["exp"] - payload["iat"] == 86400
+    assert payload["exp"] - payload["iat"] == server.API_TOKEN_TTL
 
 
 def test_token_endpoint_issues_reader_jwt():

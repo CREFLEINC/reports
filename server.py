@@ -103,7 +103,9 @@ PORT = int(os.environ.get("PORT", "8000"))
 SECRET_KEY = os.environ.get("REPORTS_SECRET_KEY") or secrets.token_hex(32)
 _USING_EPHEMERAL_KEY = "REPORTS_SECRET_KEY" not in os.environ
 TOKEN_TTL = int(os.environ.get("REPORTS_TOKEN_TTL", str(14 * 24 * 3600)))  # 기본 14일(초)
-API_TOKEN_TTL = int(os.environ.get("REPORTS_API_TOKEN_TTL", str(24 * 3600)))  # 기본 1일(초)
+API_TOKEN_TTL = int(
+    os.environ.get("REPORTS_API_TOKEN_TTL", str(24 * 3600))
+)  # 기본 1일(초)
 COOKIE_SECURE = os.environ.get("REPORTS_COOKIE_SECURE", "0") == "1"
 COOKIE_NAME = "reports_token"
 JWT_ALG = "HS256"
