@@ -20,7 +20,7 @@
 
 ## 하네스: 이슈 처리
 
-**목표:** GitHub 이슈 번호를 받아 파악·개발·검증·PR·리뷰까지 5역할(설계자·개발자·테스터·보고자·리뷰어)로 처리한다. 끝점은 리뷰 후 조건부 자동 머지다. `crefle-agent-skills:pr-review` 승인 기준(Blocker·Major 0)과 안전 조건(CI green·충돌 없음)을 충족하면 Squash 머지하고, 미충족이면 PR을 열어둔 채 사람에게 넘긴다.
+**목표:** GitHub 이슈 번호를 받아 파악·개발·검증·PR·리뷰까지 5역할(설계자·개발자·테스터·보고자·리뷰어)로 처리한다. 끝점은 독립 리뷰 후 열린 PR을 사람에게 인계하는 것이다. `crefle-agent-skills:pr-review` 승인 기준(Blocker·Major 0)과 안전 조건(CI green·충돌 없음)을 판정하되, 하네스와 역할 에이전트는 직접 머지하지 않는다.
 
 **트리거:** 이슈를 처리·개발·해결·반영하라는 요청과 그 후속 수정·재개 요청에는 `process-issue` 스킬을 사용하라. 이슈 단순 조회·요약은 직접 응답하고, 완성 HTML 리포트 등록에는 `register-report`를 사용한다.
 
@@ -43,3 +43,4 @@
 | 2026-07-14 | 이슈 처리 하네스 구성 | `process-issue`, 4개 역할 | 이슈→PR 자동화 |
 | 2026-07-24 | 리뷰어·팀 표준·조건부 머지 추가 | `process-issue`, `issue-reviewer` | CREFLE 팀 표준 연계 |
 | 2026-07-27 | Claude Code 하네스를 Codex 규격으로 포팅 | `AGENTS.md`, `.agents/`, `.codex/` | 두 도구에서 같은 업무 흐름 유지 |
+| 2026-07-29 | 이슈 처리 끝점을 리뷰 후 사람 인계로 변경 | `process-issue`, `issue-reviewer` | 자동 머지 권한 제거 |

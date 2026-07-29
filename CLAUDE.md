@@ -17,7 +17,7 @@
 
 ## 하네스: 이슈 처리
 
-**목표:** GitHub 이슈 번호를 받아 파악·개발·검증·PR·리뷰까지 5역할(설계자·개발자·테스터·보고자·리뷰어) 팀으로 처리한다. 끝점은 리뷰 후 조건부 자동 머지 — pr-review 승인 기준(Blocker·Major 0)과 안전 조건(CI green·충돌 없음) 충족 시 Squash 머지, 미충족 시 PR 을 열어둔 채 사람에게.
+**목표:** GitHub 이슈 번호를 받아 파악·개발·검증·PR·리뷰까지 5역할(설계자·개발자·테스터·보고자·리뷰어) 팀으로 처리한다. 끝점은 독립 리뷰 후 열린 PR을 사람에게 인계하는 것이다. pr-review 승인 기준(Blocker·Major 0)과 안전 조건(CI green·충돌 없음)을 판정하되 하네스와 역할 에이전트는 직접 머지하지 않는다.
 
 **트리거:** 이슈를 *처리·개발·해결·반영*하라는 요청 시 `process-issue` 스킬을 사용하라.
 (예: "6번 이슈 처리해줘", "이슈 #3 개발해서 PR 올려줘", 그리고 "다시/이어서/수정" 후속) 이슈 *단순 조회·요약*은 직접 응답. 완성 HTML 리포트 등록은 `register-report`.
@@ -27,6 +27,7 @@
 |------|----------|------|------|
 | 2026-07-14 | 초기 구성(이슈 처리 하네스) | `agents/issue-{architect,developer,tester,reporter}`, `skills/process-issue` | 이슈→PR 자동화. 설계자(메인/Opus)가 트리아지 후 서브에이전트/팀 선택; 개발자 Opus, 테스터·보고자 Sonnet |
 | 2026-07-24 | 팀 표준 스킬(crefle-agent-skills) 연계 — 리뷰어 역할 신설(Opus), 끝점을 PR 생성→리뷰 후 조건부 자동 머지로 확장, 브랜치 `<type>/<슬러그>-<번호>` 전환, 저장소에 type/priority/status 라벨 13종 생성·동기화 | `agents/issue-reviewer`(신규), `agents/issue-{architect,developer,reporter}`, `skills/process-issue`(SKILL.md·start_issue.sh) | coding-rules·issue-management·pr-review 플러그인 도입에 따른 개발팀 하네스 표준화 |
+| 2026-07-29 | 이슈 처리 끝점을 리뷰 후 사람 인계로 변경 | `process-issue`, `issue-reviewer` | 자동 머지 권한 제거 |
 
 
 ## 프로젝트 지침
