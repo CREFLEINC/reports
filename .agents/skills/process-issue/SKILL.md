@@ -1,6 +1,6 @@
 ---
 name: process-issue
-description: GitHub 이슈 번호를 받아 요구 분석, 구현, 검증, PR 생성, 독립 리뷰, 조건부 Squash 머지까지 수행하는 CREFLE Reports 전용 5역할 워크플로. "이슈 N번 처리/개발/해결/반영", "PR까지/머지까지", 이전 이슈 작업을 "이어서/다시/수정/보완"하라는 요청에 반드시 사용한다. 이슈 단순 조회·요약에는 사용하지 않고, 완성된 HTML 리포트 등록에는 register-report를 사용한다.
+description: GitHub 이슈 번호를 받아 요구 분석, 구현, 검증, PR 생성, 독립 리뷰와 사람 인계까지 수행하는 CREFLE Reports 전용 5역할 워크플로. "이슈 N번 처리/개발/해결/반영", "PR까지", 이전 이슈 작업을 "이어서/다시/수정/보완"하라는 요청에 반드시 사용한다. 이슈 단순 조회·요약에는 사용하지 않고, 완성된 HTML 리포트 등록에는 register-report를 사용한다.
 ---
 
 # GitHub 이슈 처리
@@ -10,7 +10,7 @@ description: GitHub 이슈 번호를 받아 요구 분석, 구현, 검증, PR �
 - 개발: `issue-developer`
 - 검증: `issue-tester`
 - PR: `issue-reporter`
-- 리뷰·머지 판정: `issue-reviewer`
+- 리뷰·인계 판정: `issue-reviewer`
 
 역할 설정은 `.codex/agents/*.toml`, 감사 가능한 중간 산출물은 `_workspace/issue-<n>/`에 둔다.
 
@@ -23,8 +23,8 @@ description: GitHub 이슈 번호를 받아 요구 분석, 구현, 검증, PR �
 
 ## 안전 원칙
 
-- 사용자의 "이슈 처리" 요청은 이 워크플로의 커밋·push·PR·조건부 머지를 승인한 것으로 본다. 이슈 번호가 없으면 요청한다.
-- 승인 기준이나 GitHub 안전 상태를 하나라도 확신할 수 없으면 머지하지 않는다.
+- 사용자의 "이슈 처리" 요청은 이 워크플로의 커밋·push·PR·리뷰 게시까지 승인한 것으로 본다. 이슈 번호가 없으면 요청한다.
+- 이 워크플로와 모든 역할 에이전트는 PR을 직접 머지하지 않는다. 리뷰 결과와 안전 상태를 기록하고 열린 PR을 사람에게 인계한다.
 - 현재 작업 트리의 기존 변경을 보존한다. 착수 전에 변경 파일과 기존 `_workspace`를 확인하고, 이슈와 무관한 변경은 커밋에 넣지 않는다.
 - 에이전트는 같은 작업 디렉터리를 공유한다. 쓰기 작업을 병렬화할 때 파일 소유 범위를 겹치지 않게 지정하고, 다른 에이전트의 변경을 되돌리지 말라고 명시한다.
 - 최대 동시 슬롯을 초과하지 않는다. 기본은 단계별 순차 실행이며, 복잡한 이슈의 독립 구현 조각만 최대 3개까지 병렬 실행한다.
@@ -88,7 +88,7 @@ FAIL이면 `followup_task`로 원 개발자에게 구체적인 결함을 돌려�
 
 메인 에이전트는 PR URL, base/head, 포함 파일, 테스트 근거가 계획과 일치하는지 확인한다.
 
-## Phase 5: 독립 리뷰와 조건부 머지
+## Phase 5: 독립 리뷰와 사람 인계
 
 `agent_type: issue-reviewer`를 호출하고 PR 번호, 이슈 번호, 계획·검증 산출물 경로를 전달한다.
 
@@ -98,10 +98,10 @@ FAIL이면 `followup_task`로 원 개발자에게 구체적인 결함을 돌려�
 2. 정확성·보안·테스트·컨벤션 4영역 검토
 3. Blocker/Major/Minor/Nit 분류와 한국어 리뷰 코멘트 게시
 4. `_workspace/issue-<n>/05_reviewer_verdict.md` 작성
-5. Blocker와 Major가 0이고, base=`main`, Draft 아님, `mergeable=MERGEABLE`, `mergeStateStatus=CLEAN`일 때만 `gh pr merge --squash --delete-branch`
-6. 머지 성공 시 이슈 라벨을 `status:done`으로 변경
+5. base, Draft, `mergeable`, `mergeStateStatus`, CI 상태를 확인해 사람이 머지할 수 있는지 판정
+6. 승인 여부와 무관하게 머지 명령을 실행하지 않고 `status:in-review`를 유지한 채 PR을 인계
 
-Blocker/Major가 있으면 한 번만 개발→검증→PR 갱신→델타 리뷰 루프를 실행한다. 다시 실패하거나 CI·충돌·권한 상태가 불확실하면 PR을 열어둔 채 보류한다.
+Blocker/Major가 있으면 한 번만 개발→검증→PR 갱신→델타 리뷰 루프를 실행한다. 결과와 무관하게 PR은 열린 채 사람에게 인계한다.
 
 ## 협업 도구 사용
 
@@ -121,11 +121,11 @@ Blocker/Major가 있으면 한 번만 개발→검증→PR 갱신→델타 리�
 - 테스트 결과
 - PR URL
 - 리뷰 판정
-- 머지했다면 머지 커밋, 보류했다면 정확한 이유
+- 사람의 머지 가능 여부와 보류 사유
 
 ## 테스트 시나리오
 
-- 정상: 이슈 처리 요청 → 설계 → 개발 → 테스트 PASS → PR → 리뷰 승인 및 CI green → Squash 머지
+- 정상: 이슈 처리 요청 → 설계 → 개발 → 테스트 PASS → PR → 리뷰 승인 및 CI green 확인 → 열린 PR을 사람에게 인계
 - 검증 실패: 테스터 FAIL → 원 개발자 수정 → 재검증 → 이후 단계 진행
-- 리뷰 반려: Major 발견 → 한 차례 수정·재검증·델타 리뷰 → 통과 시 머지, 재실패 시 보류
-- 안전 조건 미충족: CI pending 또는 충돌 → 리뷰는 게시하되 머지하지 않음
+- 리뷰 반려: Major 발견 → 한 차례 수정·재검증·델타 리뷰 → 결과와 열린 PR을 사람에게 인계
+- 안전 조건 미충족: CI pending 또는 충돌 → 리뷰와 보류 사유를 게시하고 열린 PR을 사람에게 인계
