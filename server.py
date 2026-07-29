@@ -39,7 +39,8 @@ REST API 클라이언트는 POST /api/v1/auth/token 으로 JWT 를 발급받아 
     REPORTS_UPLOADS_DIR                    업로드 루트 (uploads)
     REPORTS_MAX_UPLOAD_MB                  업로드 최대 크기 MB (50)
     REPORTS_SECRET_KEY                     JWT 서명 키 (미설정 시 임시 키 + 경고)
-    REPORTS_TOKEN_TTL                      토큰 수명 초 (1209600=14일)
+    REPORTS_TOKEN_TTL                      로그인 토큰 수명 초 (1209600=14일)
+    REPORTS_API_TOKEN_TTL                  API Bearer 토큰 수명 초 (86400=1일)
     REPORTS_COOKIE_SECURE                  TLS 뒤 1, 평문 HTTP 0 (기본 0)
     REPORTS_PUBLIC_BASE_URL                공개 링크 베이스 URL (미설정 시 요청 Origin)
     REPORTS_SHARE_UNLOCK_TTL               비번 보호 공개의 잠금해제 쿠키 수명 초 (43200=12시간)
@@ -102,6 +103,7 @@ PORT = int(os.environ.get("PORT", "8000"))
 SECRET_KEY = os.environ.get("REPORTS_SECRET_KEY") or secrets.token_hex(32)
 _USING_EPHEMERAL_KEY = "REPORTS_SECRET_KEY" not in os.environ
 TOKEN_TTL = int(os.environ.get("REPORTS_TOKEN_TTL", str(14 * 24 * 3600)))  # 기본 14일(초)
+API_TOKEN_TTL = int(os.environ.get("REPORTS_API_TOKEN_TTL", str(24 * 3600)))  # 기본 1일(초)
 COOKIE_SECURE = os.environ.get("REPORTS_COOKIE_SECURE", "0") == "1"
 COOKIE_NAME = "reports_token"
 JWT_ALG = "HS256"
@@ -259,11 +261,12 @@ def _role_for_credentials(username: str, password: str) -> str | None:
     return users.verify_credentials(username, password)
 
 
-def _make_token(username: str, role: str) -> str:
+def _make_token(username: str, role: str, ttl: int | None = None) -> str:
     """HS256 서명 JWT 발급(sub/role/iat/exp)."""
+    token_ttl = TOKEN_TTL if ttl is None else ttl
     now = int(time.time())
     return jwt.encode(
-        {"sub": username, "role": role, "iat": now, "exp": now + TOKEN_TTL},
+        {"sub": username, "role": role, "iat": now, "exp": now + token_ttl},
         SECRET_KEY,
         algorithm=JWT_ALG,
     )
@@ -1547,7 +1550,7 @@ def api_v1_auth_token(
 ) -> JSONResponse:
     """토큰 발급 API — form 자격증명(username/password) 검증 후 Bearer 용 JWT 발급.
 
-    성공 시 {"access_token": <JWT>, "token_type": "Bearer", "expires_in": TOKEN_TTL}.
+    성공 시 {"access_token": <JWT>, "token_type": "Bearer", "expires_in": API_TOKEN_TTL}.
     토큰은 쿠키 세션과 동일한 _make_token(sub/role/iat/exp) 을 재사용한다(신규 클레임 없음).
     자격증명 오류는 401 — 계정 존재 여부 힌트를 노출하지 않는다. 5회째 실패와
     잠금·버킷 포화 중에는 429와 남은 정수 초 `Retry-After`를 반환한다."""
@@ -1565,9 +1568,9 @@ def api_v1_auth_token(
     # RFC 6749 §5.1 — access_token 을 담은 응답은 캐시 금지(no-store + Pragma 병기).
     return JSONResponse(
         {
-            "access_token": _make_token(username, role),
+            "access_token": _make_token(username, role, ttl=API_TOKEN_TTL),
             "token_type": "Bearer",
-            "expires_in": TOKEN_TTL,
+            "expires_in": API_TOKEN_TTL,
         },
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
