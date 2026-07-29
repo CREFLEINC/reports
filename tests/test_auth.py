@@ -23,10 +23,14 @@ def _isolate_auth_failure_state():
     with server._FAILURE_STATE_LOCK:
         server._AUTH_FAILURES.clear()
         server._SHARE_UNLOCK_FAILURES.clear()
+        server._AUTH_FAILURE_OVERFLOW.clear()
+        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
     yield
     with server._FAILURE_STATE_LOCK:
         server._AUTH_FAILURES.clear()
         server._SHARE_UNLOCK_FAILURES.clear()
+        server._AUTH_FAILURE_OVERFLOW.clear()
+        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
 
 
 def test_healthz_no_auth():
@@ -403,8 +407,8 @@ def test_auth_failure_bucket_fails_closed_without_evicting_active_entries(monkey
         )
     now[0] = 1001.0
     for suffix in (2, 3):
-        c = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
-        assert c.post(
+        attempt_client = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        assert attempt_client.post(
             "/login",
             data={"username": "reader", "password": "WRONG", "next": "/"},
         ).status_code == 401
@@ -412,8 +416,8 @@ def test_auth_failure_bucket_fails_closed_without_evicting_active_entries(monkey
     before_churn = dict(server._AUTH_FAILURES)
     now[0] = 1002.0
     for suffix in (4, 5, 6):
-        c = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
-        saturated = c.post(
+        attempt_client = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        saturated = attempt_client.post(
             "/login",
             data={"username": "reader", "password": "WRONG", "next": "/"},
         )
@@ -434,8 +438,8 @@ def test_saturated_auth_bucket_allows_valid_login_and_token(monkeypatch):
     monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 3, raising=False)
 
     for suffix in (1, 2, 3):
-        c = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
-        failed = c.post(
+        attempt_client = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        failed = attempt_client.post(
             "/login",
             data={"username": "reader", "password": "WRONG", "next": "/"},
         )
@@ -455,6 +459,115 @@ def test_saturated_auth_bucket_allows_valid_login_and_token(monkeypatch):
     )
     assert valid_token.status_code == 200
     assert server._AUTH_FAILURES == before_success
+
+
+def test_saturated_auth_overflow_limits_ip_after_interleaved_success(
+    monkeypatch,
+):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 1200.0)
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 2, raising=False)
+
+    for suffix in (1, 2):
+        attempt_client = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        failed = attempt_client.post(
+            "/login",
+            data={"username": "reader", "password": "WRONG", "next": "/"},
+        )
+        assert failed.status_code == 401
+
+    before_overflow = dict(server._AUTH_FAILURES)
+    verified_credentials = []
+    verify_credentials = server._role_for_credentials
+
+    def count_verification(username, password):
+        verified_credentials.append((username, password))
+        return verify_credentials(username, password)
+
+    monkeypatch.setattr(server, "_role_for_credentials", count_verification)
+    overflow_client = TestClient(app, client=("198.51.100.50", 50000))
+    for attempt in range(4):
+        path = "/login" if attempt % 2 == 0 else "/api/v1/auth/token"
+        response = overflow_client.post(
+            path,
+            data={"username": f"attacker-{attempt}", "password": "WRONG", "next": "/"},
+        )
+        assert response.status_code == 429
+
+    valid = overflow_client.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert valid.status_code == 200
+    fifth_failure = overflow_client.post(
+        "/login",
+        data={"username": "attacker-4", "password": "WRONG", "next": "/"},
+    )
+    assert fifth_failure.status_code == 429
+    assert [password for _username, password in verified_credentials].count("WRONG") == 5
+
+    before_locked_attempt = list(verified_credentials)
+    locked = overflow_client.post(
+        "/api/v1/auth/token",
+        data={"username": "attacker-5", "password": "WRONG"},
+    )
+    assert locked.status_code == 429
+    assert locked.headers["retry-after"] == "60"
+    assert verified_credentials == before_locked_attempt
+    assert server._AUTH_FAILURES == before_overflow
+
+
+def test_saturated_auth_overflow_reuses_bounded_capacity_in_expiry_order(monkeypatch):
+    now = [1250.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 1, raising=False)
+    monkeypatch.setattr(server, "_FAILURE_OVERFLOW_BUCKET_LIMIT", 2, raising=False)
+
+    primary_client = TestClient(app, client=("198.51.100.60", 50000))
+    assert primary_client.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    ).status_code == 401
+
+    for suffix in (61, 62):
+        overflow_client = TestClient(app, client=(f"198.51.100.{suffix}", 50000))
+        assert overflow_client.post(
+            "/login",
+            data={"username": f"attacker-{suffix}", "password": "WRONG", "next": "/"},
+        ).status_code == 429
+        now[0] += 1
+
+    assert len(server._AUTH_FAILURE_OVERFLOW) == 2
+    newcomer = TestClient(app, client=("198.51.100.63", 50000))
+    valid = newcomer.post(
+        "/login",
+        data={"username": "reader", "password": "readerpass", "next": "/"},
+        follow_redirects=False,
+    )
+    assert valid.status_code == 303
+    assert len(server._AUTH_FAILURE_OVERFLOW) == 2
+    failed = newcomer.post(
+        "/login",
+        data={"username": "attacker-63", "password": "WRONG", "next": "/"},
+    )
+    assert failed.status_code == 429
+    assert len(server._AUTH_FAILURE_OVERFLOW) == 2
+    assert "198.51.100.61" not in server._AUTH_FAILURE_OVERFLOW
+    assert "198.51.100.62" in server._AUTH_FAILURE_OVERFLOW
+    assert "198.51.100.63" in server._AUTH_FAILURE_OVERFLOW
+
+    now[0] = 1254.0
+    assert primary_client.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    ).status_code == 401
+    now[0] = 1311.0
+    retried = TestClient(app, client=("198.51.100.61", 50000)).post(
+        "/login",
+        data={"username": "new-attacker", "password": "WRONG", "next": "/"},
+    )
+    assert retried.status_code == 429
+    assert "198.51.100.62" not in server._AUTH_FAILURE_OVERFLOW
+    assert "198.51.100.61" in server._AUTH_FAILURE_OVERFLOW
 
 
 def test_auth_failure_bucket_refreshes_order_before_pruning(monkeypatch):

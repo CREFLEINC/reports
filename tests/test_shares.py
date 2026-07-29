@@ -42,12 +42,16 @@ def _clean_shares():
     with server._FAILURE_STATE_LOCK:
         server._AUTH_FAILURES.clear()
         server._SHARE_UNLOCK_FAILURES.clear()
+        server._AUTH_FAILURE_OVERFLOW.clear()
+        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
     shares.SHARES_FILE.parent.mkdir(parents=True, exist_ok=True)
     shares._write_raw({})
     yield
     with server._FAILURE_STATE_LOCK:
         server._AUTH_FAILURES.clear()
         server._SHARE_UNLOCK_FAILURES.clear()
+        server._AUTH_FAILURE_OVERFLOW.clear()
+        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
     shares.SHARES_FILE.unlink(missing_ok=True)
 
 
@@ -360,15 +364,15 @@ def test_share_failure_bucket_fails_closed_without_evicting_active_entries(monke
         victim.post(f"/s/{token}/unlock", data={"password": "WRONG"})
     now[0] = 1201.0
     for suffix in (2, 3):
-        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
-        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        attempt_client = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        failed = attempt_client.post(f"/s/{token}/unlock", data={"password": "WRONG"})
         assert failed.status_code == 401
 
     before_churn = dict(server._SHARE_UNLOCK_FAILURES)
     now[0] = 1202.0
     for suffix in (4, 5, 6):
-        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
-        saturated = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        attempt_client = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        saturated = attempt_client.post(f"/s/{token}/unlock", data={"password": "WRONG"})
         assert saturated.status_code == 429
         assert saturated.headers["retry-after"] == "58"
 
@@ -384,8 +388,8 @@ def test_saturated_share_bucket_allows_valid_password(monkeypatch):
     token = _create_share(_docs_with_pdf()[0]["rel"], password="s3cret")["token"]
 
     for suffix in (1, 2, 3):
-        c = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
-        failed = c.post(f"/s/{token}/unlock", data={"password": "WRONG"})
+        attempt_client = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        failed = attempt_client.post(f"/s/{token}/unlock", data={"password": "WRONG"})
         assert failed.status_code == 401
 
     before_success = dict(server._SHARE_UNLOCK_FAILURES)
@@ -396,6 +400,63 @@ def test_saturated_share_bucket_allows_valid_password(monkeypatch):
     )
     assert valid_new_key.status_code == 303
     assert server._SHARE_UNLOCK_FAILURES == before_success
+
+
+def test_saturated_share_overflow_limits_ip_after_interleaved_success(
+    monkeypatch,
+):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 1300.0)
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 2, raising=False)
+    doc_rel = _docs_with_pdf()[0]["rel"]
+    tokens = [_create_share(doc_rel, password="s3cret")["token"] for _ in range(7)]
+
+    for suffix in (1, 2):
+        attempt_client = TestClient(app, client=(f"203.0.113.{suffix}", 50000))
+        failed = attempt_client.post(
+            f"/s/{tokens[0]}/unlock",
+            data={"password": "WRONG"},
+        )
+        assert failed.status_code == 401
+
+    before_overflow = dict(server._SHARE_UNLOCK_FAILURES)
+    verified_passwords = []
+    verify_password = shares.verify_password
+
+    def count_verification(password, salt_hex, hash_hex):
+        verified_passwords.append(password)
+        return verify_password(password, salt_hex, hash_hex)
+
+    monkeypatch.setattr(shares, "verify_password", count_verification)
+    overflow_client = TestClient(app, client=("203.0.113.50", 50000))
+    for token in tokens[:4]:
+        response = overflow_client.post(
+            f"/s/{token}/unlock",
+            data={"password": "WRONG"},
+        )
+        assert response.status_code == 429
+
+    valid = overflow_client.post(
+        f"/s/{tokens[4]}/unlock",
+        data={"password": "s3cret"},
+        follow_redirects=False,
+    )
+    assert valid.status_code == 303
+    fifth_failure = overflow_client.post(
+        f"/s/{tokens[5]}/unlock",
+        data={"password": "WRONG"},
+    )
+    assert fifth_failure.status_code == 429
+    assert verified_passwords.count("WRONG") == 5
+
+    before_locked_attempt = list(verified_passwords)
+    locked = overflow_client.post(
+        f"/s/{tokens[6]}/unlock",
+        data={"password": "WRONG"},
+    )
+    assert locked.status_code == 429
+    assert locked.headers["retry-after"] == "60"
+    assert verified_passwords == before_locked_attempt
+    assert server._SHARE_UNLOCK_FAILURES == before_overflow
 
 
 # ── 통합: 만료 / 해제 ────────────────────────────────────────────────────────
