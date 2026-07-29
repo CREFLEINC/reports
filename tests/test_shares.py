@@ -39,19 +39,9 @@ def _expiry(days: int = 30) -> str:
 
 @pytest.fixture(autouse=True)
 def _clean_shares():
-    with server._FAILURE_STATE_LOCK:
-        server._AUTH_FAILURES.clear()
-        server._SHARE_UNLOCK_FAILURES.clear()
-        server._AUTH_FAILURE_OVERFLOW.clear()
-        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
     shares.SHARES_FILE.parent.mkdir(parents=True, exist_ok=True)
     shares._write_raw({})
     yield
-    with server._FAILURE_STATE_LOCK:
-        server._AUTH_FAILURES.clear()
-        server._SHARE_UNLOCK_FAILURES.clear()
-        server._AUTH_FAILURE_OVERFLOW.clear()
-        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
     shares.SHARES_FILE.unlink(missing_ok=True)
 
 
