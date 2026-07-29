@@ -516,6 +516,72 @@ def test_saturated_auth_overflow_limits_ip_after_interleaved_success(
     assert server._AUTH_FAILURES == before_overflow
 
 
+def test_auth_overflow_counter_survives_primary_slot_release_until_expiry(
+    monkeypatch,
+):
+    now = [1400.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 1, raising=False)
+    attack_client = TestClient(app, client=("198.51.100.70", 50000))
+
+    primary_failure = attack_client.post(
+        "/login",
+        data={"username": "reader", "password": "WRONG", "next": "/"},
+    )
+    assert primary_failure.status_code == 401
+
+    verified_credentials = []
+    verify_credentials = server._role_for_credentials
+
+    def count_verification(username, password):
+        verified_credentials.append((username, password))
+        return verify_credentials(username, password)
+
+    monkeypatch.setattr(server, "_role_for_credentials", count_verification)
+    for attempt in range(4):
+        path = "/login" if attempt % 2 == 0 else "/api/v1/auth/token"
+        overflow_failure = attack_client.post(
+            path,
+            data={"username": f"attacker-{attempt}", "password": "WRONG", "next": "/"},
+        )
+        assert overflow_failure.status_code == 429
+
+    valid = attack_client.post(
+        "/api/v1/auth/token",
+        data={"username": "reader", "password": "readerpass"},
+    )
+    assert valid.status_code == 200
+    assert server._AUTH_FAILURES == {}
+
+    fifth_failure = attack_client.post(
+        "/login",
+        data={"username": "attacker-4", "password": "WRONG", "next": "/"},
+    )
+    assert fifth_failure.status_code == 429
+    assert fifth_failure.headers["retry-after"] == "60"
+    assert [password for _username, password in verified_credentials].count("WRONG") == 5
+    assert server._AUTH_FAILURE_OVERFLOW["198.51.100.70"][0] == 5
+    assert server._AUTH_FAILURES == {}
+
+    before_locked_attempt = list(verified_credentials)
+    locked = attack_client.post(
+        "/api/v1/auth/token",
+        data={"username": "attacker-5", "password": "WRONG"},
+    )
+    assert locked.status_code == 429
+    assert verified_credentials == before_locked_attempt
+
+    now[0] = 1460.0
+    after_expiry = attack_client.post(
+        "/login",
+        data={"username": "attacker-6", "password": "WRONG", "next": "/"},
+    )
+    assert after_expiry.status_code == 401
+    assert [password for _username, password in verified_credentials].count("WRONG") == 6
+    assert "198.51.100.70" not in server._AUTH_FAILURE_OVERFLOW
+    assert ("198.51.100.70", "attacker-6") in server._AUTH_FAILURES
+
+
 def test_saturated_auth_overflow_reuses_bounded_capacity_in_expiry_order(monkeypatch):
     now = [1250.0]
     monkeypatch.setattr(server.time, "monotonic", lambda: now[0])

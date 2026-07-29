@@ -212,6 +212,21 @@ def _record_failure(
         _prune_expired_failures(failures, now)
         state = failures.get(key)
         if state is None:
+            if overflow_failures is not None and overflow_key is not None:
+                _prune_expired_failures(overflow_failures, now)
+                if overflow_key in overflow_failures:
+                    overflow_retry_after = _record_overflow_failure(
+                        overflow_failures,
+                        overflow_key,
+                        now,
+                    )
+                    if overflow_retry_after is not None:
+                        return overflow_retry_after
+                    if len(failures) >= _FAILURE_BUCKET_LIMIT:
+                        oldest_key = next(iter(failures))
+                        _count, earliest_expiry = failures[oldest_key]
+                        return max(1, math.ceil(earliest_expiry - now))
+                    return None
             if len(failures) >= _FAILURE_BUCKET_LIMIT:
                 oldest_key = next(iter(failures))
                 _count, earliest_expiry = failures[oldest_key]

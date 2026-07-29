@@ -459,6 +459,74 @@ def test_saturated_share_overflow_limits_ip_after_interleaved_success(
     assert server._SHARE_UNLOCK_FAILURES == before_overflow
 
 
+def test_share_overflow_counter_survives_primary_slot_release_until_expiry(
+    monkeypatch,
+):
+    now = [1450.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(server, "_FAILURE_BUCKET_LIMIT", 1, raising=False)
+    doc_rel = _docs_with_pdf()[0]["rel"]
+    tokens = [_create_share(doc_rel, password="s3cret")["token"] for _ in range(7)]
+    attack_client = TestClient(app, client=("203.0.113.70", 50000))
+
+    primary_failure = attack_client.post(
+        f"/s/{tokens[0]}/unlock",
+        data={"password": "WRONG"},
+    )
+    assert primary_failure.status_code == 401
+
+    verified_passwords = []
+    verify_password = shares.verify_password
+
+    def count_verification(password, salt_hex, hash_hex):
+        verified_passwords.append(password)
+        return verify_password(password, salt_hex, hash_hex)
+
+    monkeypatch.setattr(shares, "verify_password", count_verification)
+    for token in tokens[1:5]:
+        overflow_failure = attack_client.post(
+            f"/s/{token}/unlock",
+            data={"password": "WRONG"},
+        )
+        assert overflow_failure.status_code == 429
+
+    valid = attack_client.post(
+        f"/s/{tokens[0]}/unlock",
+        data={"password": "s3cret"},
+        follow_redirects=False,
+    )
+    assert valid.status_code == 303
+    assert server._SHARE_UNLOCK_FAILURES == {}
+
+    fifth_failure = attack_client.post(
+        f"/s/{tokens[5]}/unlock",
+        data={"password": "WRONG"},
+    )
+    assert fifth_failure.status_code == 429
+    assert fifth_failure.headers["retry-after"] == "60"
+    assert verified_passwords.count("WRONG") == 5
+    assert server._SHARE_UNLOCK_FAILURE_OVERFLOW["203.0.113.70"][0] == 5
+    assert server._SHARE_UNLOCK_FAILURES == {}
+
+    before_locked_attempt = list(verified_passwords)
+    locked = attack_client.post(
+        f"/s/{tokens[6]}/unlock",
+        data={"password": "WRONG"},
+    )
+    assert locked.status_code == 429
+    assert verified_passwords == before_locked_attempt
+
+    now[0] = 1510.0
+    after_expiry = attack_client.post(
+        f"/s/{tokens[6]}/unlock",
+        data={"password": "WRONG"},
+    )
+    assert after_expiry.status_code == 401
+    assert verified_passwords.count("WRONG") == 6
+    assert "203.0.113.70" not in server._SHARE_UNLOCK_FAILURE_OVERFLOW
+    assert ("203.0.113.70", tokens[6]) in server._SHARE_UNLOCK_FAILURES
+
+
 # ── 통합: 만료 / 해제 ────────────────────────────────────────────────────────
 def test_expired_share_not_accessible():
     doc = _docs_with_pdf()[0]
