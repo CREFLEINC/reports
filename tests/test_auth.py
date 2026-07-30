@@ -28,6 +28,14 @@ def test_token_roundtrip():
     assert payload is not None
     assert payload["sub"] == "alice"
     assert payload["role"] == "reader"
+    assert payload["exp"] - payload["iat"] == server.TOKEN_TTL
+
+
+def test_make_token_accepts_custom_ttl_without_changing_claims():
+    tok = server._make_token("alice", "reader", ttl=321)
+    payload = jwt.decode(tok, server.SECRET_KEY, algorithms=[server.JWT_ALG])
+    assert set(payload) == {"sub", "role", "iat", "exp"}
+    assert payload["exp"] - payload["iat"] == 321
 
 
 def test_decode_rejects_tampered():
@@ -97,7 +105,9 @@ def test_login_sets_cookie_and_grants_access():
     r = c.post("/login", data={"username": "reader", "password": "readerpass", "next": "/"},
                follow_redirects=False)
     assert r.status_code == 303
-    assert "reports_token=" in r.headers.get("set-cookie", "")
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "reports_token=" in set_cookie
+    assert f"Max-Age={server.TOKEN_TTL}" in set_cookie
     r2 = c.get("/", headers={"accept": "text/html"})
     assert r2.status_code == 200
 
@@ -217,11 +227,13 @@ def test_token_endpoint_issues_uploader_jwt():
     assert r.status_code == 200
     body = r.json()
     assert body["token_type"] == "Bearer"
-    assert body["expires_in"] == server.TOKEN_TTL
+    assert body["expires_in"] == server.API_TOKEN_TTL
     payload = server._decode_token(body["access_token"])
     assert payload is not None
+    assert set(payload) == {"sub", "role", "iat", "exp"}
     assert payload["sub"] == "uploader"
     assert payload["role"] == "uploader"
+    assert payload["exp"] - payload["iat"] == server.API_TOKEN_TTL
 
 
 def test_token_endpoint_issues_reader_jwt():
