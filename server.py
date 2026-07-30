@@ -112,14 +112,17 @@ PUBLIC_BASE_URL = os.environ.get("REPORTS_PUBLIC_BASE_URL", "").rstrip("/")
 SHARE_UNLOCK_COOKIE = "share_unlock"  # 비번 보호 공개의 잠금해제 상태(서명 JWT). Path=/s/<token> 스코프.
 SHARE_UNLOCK_TTL = int(os.environ.get("REPORTS_SHARE_UNLOCK_TTL", str(12 * 3600)))  # 기본 12시간
 
-# 단일 프로세스 내 자격증 실패 추적. 만료 또는 성공 시 해당 버킷을 제거한다.
+# 단일 프로세스 내 자격증 실패 추적. 주 버킷은 성공 시 초기화하고 overflow는 IP별로 유지한다.
 _FAILURE_LIMIT = 5
 _LOCKOUT_SECONDS = 60
 _FAILURE_BUCKET_LIMIT = 10_000
+_FAILURE_OVERFLOW_BUCKET_LIMIT = 10_000
 _FailureKey = Union[str, tuple[str, str]]
 _FailureBucket = dict[_FailureKey, tuple[int, float]]
 _AUTH_FAILURES: _FailureBucket = {}
 _SHARE_UNLOCK_FAILURES: _FailureBucket = {}
+_AUTH_FAILURE_OVERFLOW: _FailureBucket = {}
+_SHARE_UNLOCK_FAILURE_OVERFLOW: _FailureBucket = {}
 _FAILURE_STATE_LOCK = Lock()
 
 # 폴더 경로(서버 기준 상대) → 목차에 표시할 사람이 읽는 섹션 이름
@@ -179,16 +182,12 @@ def _locked_retry_after(
     failures: _FailureBucket,
     key: _FailureKey,
 ) -> int | None:
-    """해당 버킷의 잠금 또는 포화 시 남은 초를 반환한다."""
+    """해당 키가 잠겨 있으면 남은 초를 반환한다."""
     now = time.monotonic()
     with _FAILURE_STATE_LOCK:
         _prune_expired_failures(failures, now)
         state = failures.get(key)
         if state is None:
-            if len(failures) >= _FAILURE_BUCKET_LIMIT:
-                oldest_key = next(iter(failures))
-                _count, earliest_expiry = failures[oldest_key]
-                return max(1, math.ceil(earliest_expiry - now))
             return None
         count, expires_at = state
         remaining = expires_at - now
@@ -203,16 +202,42 @@ def _locked_retry_after(
 def _record_failure(
     failures: _FailureBucket,
     key: _FailureKey,
+    *,
+    overflow_failures: _FailureBucket | None = None,
+    overflow_key: _FailureKey | None = None,
 ) -> int | None:
-    """실패를 기록하고 임계값에 도달하면 잠금 초를 반환한다."""
+    """실패를 주 버킷 또는 포화 시 overflow에 기록하고 잠금 초를 반환한다."""
     now = time.monotonic()
     with _FAILURE_STATE_LOCK:
         _prune_expired_failures(failures, now)
         state = failures.get(key)
         if state is None:
+            if overflow_failures is not None and overflow_key is not None:
+                _prune_expired_failures(overflow_failures, now)
+                if overflow_key in overflow_failures:
+                    overflow_retry_after = _record_overflow_failure(
+                        overflow_failures,
+                        overflow_key,
+                        now,
+                    )
+                    if overflow_retry_after is not None:
+                        return overflow_retry_after
+                    if len(failures) >= _FAILURE_BUCKET_LIMIT:
+                        oldest_key = next(iter(failures))
+                        _count, earliest_expiry = failures[oldest_key]
+                        return max(1, math.ceil(earliest_expiry - now))
+                    return None
             if len(failures) >= _FAILURE_BUCKET_LIMIT:
                 oldest_key = next(iter(failures))
                 _count, earliest_expiry = failures[oldest_key]
+                if overflow_failures is not None and overflow_key is not None:
+                    overflow_retry_after = _record_overflow_failure(
+                        overflow_failures,
+                        overflow_key,
+                        now,
+                    )
+                    if overflow_retry_after is not None:
+                        return overflow_retry_after
                 return max(1, math.ceil(earliest_expiry - now))
             count = 0
         else:
@@ -224,6 +249,31 @@ def _record_failure(
         failures[key] = (count, now + _LOCKOUT_SECONDS)
         if count >= _FAILURE_LIMIT:
             return _LOCKOUT_SECONDS
+    return None
+
+
+def _record_overflow_failure(
+    failures: _FailureBucket,
+    key: _FailureKey,
+    now: float,
+) -> int | None:
+    """락이 잡힌 상태에서 상한이 있는 overflow 실패를 기록한다."""
+    _prune_expired_failures(failures, now)
+    state = failures.get(key)
+    if state is None:
+        if len(failures) >= _FAILURE_OVERFLOW_BUCKET_LIMIT:
+            oldest_key = next(iter(failures))
+            failures.pop(oldest_key)
+        count = 0
+    else:
+        count, expires_at = state
+        if count >= _FAILURE_LIMIT:
+            return max(1, math.ceil(expires_at - now))
+    count += 1
+    failures.pop(key, None)
+    failures[key] = (count, now + _LOCKOUT_SECONDS)
+    if count >= _FAILURE_LIMIT:
+        return _LOCKOUT_SECONDS
     return None
 
 
@@ -1550,14 +1600,21 @@ def api_v1_auth_token(
     성공 시 {"access_token": <JWT>, "token_type": "Bearer", "expires_in": TOKEN_TTL}.
     토큰은 쿠키 세션과 동일한 _make_token(sub/role/iat/exp) 을 재사용한다(신규 클레임 없음).
     자격증명 오류는 401 — 계정 존재 여부 힌트를 노출하지 않는다. 5회째 실패와
-    잠금·버킷 포화 중에는 429와 남은 정수 초 `Retry-After`를 반환한다."""
+    잠금 중 또는 포화 버킷의 신규 실패에는 429와 남은 정수 초 `Retry-After`를 반환한다."""
     failure_key = _auth_failure_key(request, username)
     retry_after = _locked_retry_after(_AUTH_FAILURES, failure_key)
+    if retry_after is None:
+        retry_after = _locked_retry_after(_AUTH_FAILURE_OVERFLOW, _client_ip(request))
     if retry_after is not None:
         raise _rate_limit_error(retry_after)
     role = _role_for_credentials(username, password)
     if not role:
-        retry_after = _record_failure(_AUTH_FAILURES, failure_key)
+        retry_after = _record_failure(
+            _AUTH_FAILURES,
+            failure_key,
+            overflow_failures=_AUTH_FAILURE_OVERFLOW,
+            overflow_key=_client_ip(request),
+        )
         if retry_after is not None:
             raise _rate_limit_error(retry_after)
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
@@ -1591,11 +1648,18 @@ def login_submit(
     target = _safe_next(next)
     failure_key = _auth_failure_key(request, username)
     retry_after = _locked_retry_after(_AUTH_FAILURES, failure_key)
+    if retry_after is None:
+        retry_after = _locked_retry_after(_AUTH_FAILURE_OVERFLOW, _client_ip(request))
     if retry_after is not None:
         raise _rate_limit_error(retry_after)
     role = _role_for_credentials(username, password)
     if not role:
-        retry_after = _record_failure(_AUTH_FAILURES, failure_key)
+        retry_after = _record_failure(
+            _AUTH_FAILURES,
+            failure_key,
+            overflow_failures=_AUTH_FAILURE_OVERFLOW,
+            overflow_key=_client_ip(request),
+        )
         if retry_after is not None:
             raise _rate_limit_error(retry_after)
         return HTMLResponse(
@@ -1697,10 +1761,20 @@ def share_unlock(token: str, request: Request, password: str = Form(...)) -> Res
         return RedirectResponse(f"/s/{token}", status_code=303)
     failure_key = (_client_ip(request), token)
     retry_after = _locked_retry_after(_SHARE_UNLOCK_FAILURES, failure_key)
+    if retry_after is None:
+        retry_after = _locked_retry_after(
+            _SHARE_UNLOCK_FAILURE_OVERFLOW,
+            _client_ip(request),
+        )
     if retry_after is not None:
         raise _rate_limit_error(retry_after)
     if not shares.verify_password(password, rec.get("pw_salt") or "", rec.get("pw_hash") or ""):
-        retry_after = _record_failure(_SHARE_UNLOCK_FAILURES, failure_key)
+        retry_after = _record_failure(
+            _SHARE_UNLOCK_FAILURES,
+            failure_key,
+            overflow_failures=_SHARE_UNLOCK_FAILURE_OVERFLOW,
+            overflow_key=_client_ip(request),
+        )
         if retry_after is not None:
             raise _rate_limit_error(retry_after)
         return HTMLResponse(render_share_password(token, error="비밀번호가 올바르지 않습니다."),
