@@ -18,21 +18,6 @@ from server import app
 client = TestClient(app)
 
 
-@pytest.fixture(autouse=True)
-def _isolate_auth_failure_state():
-    with server._FAILURE_STATE_LOCK:
-        server._AUTH_FAILURES.clear()
-        server._SHARE_UNLOCK_FAILURES.clear()
-        server._AUTH_FAILURE_OVERFLOW.clear()
-        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
-    yield
-    with server._FAILURE_STATE_LOCK:
-        server._AUTH_FAILURES.clear()
-        server._SHARE_UNLOCK_FAILURES.clear()
-        server._AUTH_FAILURE_OVERFLOW.clear()
-        server._SHARE_UNLOCK_FAILURE_OVERFLOW.clear()
-
-
 def test_healthz_no_auth():
     assert client.get("/healthz").status_code == 200
 
