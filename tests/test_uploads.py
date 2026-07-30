@@ -4,8 +4,10 @@ _extract_zip_safe / _flatten_single_root 는 경로 인자를 받으므로 tmp_p
 테스트한다(비동기 불필요). 마지막 한 건은 TestClient 로 POST /upload 전 경로를 e2e 검증.
 """
 import os
+import stat
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 # server import 전에 결정적 자격증명/키 강제(test_auth 와 동일 — 단독 실행도 동작하도록).
 os.environ.setdefault("REPORTS_USER", "reader")
@@ -99,6 +101,152 @@ def test_traversal_in_junk_still_rejected(tmp_path):
     with pytest.raises(HTTPException) as ei:
         uh._extract_zip_safe(z, stage)
     assert ei.value.status_code == 422
+
+
+def test_disallowed_members_skipped_while_allowed_members_extract(tmp_path):
+    z = _make_zip(tmp_path / "u.zip", {
+        "index.html": HTML,
+        "fonts/report.woff2": b"font",
+        "LICENSE.txt": b"license",
+        "docs/NOTICE": b"notice",
+        "docs/source.exe": b"binary",
+    })
+    stage = tmp_path / "stage"
+
+    uh._extract_zip_safe(z, stage)
+
+    assert (stage / "index.html").is_file()
+    assert (stage / "fonts" / "report.woff2").is_file()
+    assert not (stage / "LICENSE.txt").exists()
+    assert not (stage / "docs").exists()
+
+
+def test_all_disallowed_members_rejected_clearly(tmp_path):
+    z = _make_zip(tmp_path / "u.zip", {
+        "LICENSE.txt": b"license",
+        "docs/NOTICE": b"notice",
+    })
+    stage = tmp_path / "stage"
+
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(z, stage)
+
+    assert exc_info.value.status_code == 422
+    assert "콘텐츠" in exc_info.value.detail
+
+
+def test_disallowed_members_skipped_but_missing_html_rejected(tmp_path):
+    z = _make_zip(tmp_path / "u.zip", {
+        "assets/style.css": b"body{}",
+        "LICENSE.txt": b"license",
+    })
+    stage = tmp_path / "stage"
+
+    uh._extract_zip_safe(z, stage)
+    uh._flatten_single_root(stage)
+    with pytest.raises(HTTPException) as exc_info:
+        uh._resolve_doc_html(stage)
+
+    assert exc_info.value.status_code == 422
+    assert "index.html" in exc_info.value.detail
+
+
+@pytest.mark.parametrize("unsafe_name", [
+    "/absolute/LICENSE.txt",
+    "../LICENSE.txt",
+    "nested/../../LICENSE.txt",
+    r"nested\LICENSE.txt",
+    r"C:\LICENSE.txt",
+])
+def test_disallowed_member_unsafe_path_still_rejected(tmp_path, unsafe_name):
+    z = _make_zip(tmp_path / "u.zip", {
+        "index.html": HTML,
+        unsafe_name: b"license",
+    })
+    stage = tmp_path / "stage"
+
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(z, stage)
+
+    assert exc_info.value.status_code == 422
+
+
+def test_disallowed_member_with_nul_still_rejected(tmp_path, monkeypatch):
+    class NulMemberZip:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def infolist(self):
+            return [SimpleNamespace(filename="LICENSE.txt\x00hidden", external_attr=0)]
+
+    monkeypatch.setattr(uh.zipfile, "ZipFile", lambda _: NulMemberZip())
+
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(tmp_path / "u.zip", tmp_path / "stage")
+
+    assert exc_info.value.status_code == 422
+
+
+def test_disallowed_symlink_member_still_rejected(tmp_path):
+    z = tmp_path / "u.zip"
+    link = zipfile.ZipInfo("LICENSE.txt")
+    link.create_system = 3
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("index.html", HTML)
+        zf.writestr(link, "target")
+    stage = tmp_path / "stage"
+
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(z, stage)
+
+    assert exc_info.value.status_code == 422
+    assert "심볼릭링크" in exc_info.value.detail
+
+
+def test_disallowed_members_still_count_toward_entry_limit(tmp_path, monkeypatch):
+    z = _make_zip(tmp_path / "u.zip", {
+        "LICENSE.txt": b"license",
+        "NOTICE": b"notice",
+    })
+    monkeypatch.setattr(uh, "MAX_ENTRIES", 1)
+
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(z, tmp_path / "stage")
+
+    assert exc_info.value.status_code == 422
+    assert "항목 수" in exc_info.value.detail
+
+
+def test_allowed_members_keep_per_file_ratio_and_total_limits(tmp_path, monkeypatch):
+    """필터 변경 뒤에도 실제로 추출하는 허용 멤버의 bomb 상한은 그대로 적용된다."""
+    too_big = _make_zip(tmp_path / "too-big.zip", {"index.html": HTML})
+    monkeypatch.setattr(uh, "PER_FILE_MAX", len(HTML) - 1)
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(too_big, tmp_path / "too-big-stage")
+    assert exc_info.value.status_code == 422
+
+    ratio_zip = tmp_path / "ratio.zip"
+    with zipfile.ZipFile(ratio_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("index.html", b"a" * 4096)
+    monkeypatch.setattr(uh, "PER_FILE_MAX", uh.MAX_UPLOAD)
+    monkeypatch.setattr(uh, "MAX_RATIO", 1)
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(ratio_zip, tmp_path / "ratio-stage")
+    assert exc_info.value.status_code == 422
+
+    total_zip = _make_zip(tmp_path / "total.zip", {
+        "index.html": HTML,
+        "assets/style.css": b"body{}",
+    })
+    monkeypatch.setattr(uh, "MAX_RATIO", 200)
+    monkeypatch.setattr(uh, "TOTAL_UNCOMPRESSED_MAX", len(HTML))
+    with pytest.raises(HTTPException) as exc_info:
+        uh._extract_zip_safe(total_zip, tmp_path / "total-stage")
+    assert exc_info.value.status_code == 422
 
 
 # ── _flatten_single_root ────────────────────────────────────────────────────
@@ -275,6 +423,69 @@ def test_api_documents_zip_publishes(tmp_path, cleanup_api_docs):
     assert r.headers["location"] == body["href"]
     assert (type_dir / "apizip_v2" / "index.html").is_file()
     assert (type_dir / "apizip_v2" / "assets" / "style.css").is_file()
+
+
+def test_api_documents_mixed_zip_skips_disallowed_files(tmp_path, cleanup_api_docs):
+    type_dir = cleanup_api_docs
+    z = _make_zip(tmp_path / "u.zip", {
+        "index.html": HTML,
+        "fonts/report.woff2": b"font",
+        "LICENSE.txt": b"license",
+    })
+    c = _uploader_client()
+    with z.open("rb") as fh:
+        r = c.post(
+            "/api/v1/documents",
+            data={"doc_type": "apitest", "name": "apimixed", "version": "1"},
+            files={"file": ("bundle.zip", fh, "application/zip")},
+        )
+
+    assert r.status_code == 201, r.text
+    dest = type_dir / "apimixed_v1"
+    assert (dest / "index.html").is_file()
+    assert (dest / "fonts" / "report.woff2").is_file()
+    assert not (dest / "LICENSE.txt").exists()
+
+
+@pytest.mark.parametrize("members", [
+    {"LICENSE.txt": b"license", "NOTICE": b"notice"},
+    {"assets/style.css": b"body{}", "LICENSE.txt": b"license"},
+])
+def test_api_documents_no_publishable_html_returns_422(tmp_path, cleanup_api_docs, members):
+    z = _make_zip(tmp_path / "u.zip", members)
+    c = _uploader_client()
+    with z.open("rb") as fh:
+        r = c.post(
+            "/api/v1/documents",
+            data={"doc_type": "apitest", "name": "apinocontent", "version": "1"},
+            files={"file": ("bundle.zip", fh, "application/zip")},
+        )
+    assert r.status_code == 422, r.text
+    assert not (cleanup_api_docs / "apinocontent_v1").exists()
+
+
+def test_api_documents_invalid_zip_preserves_existing_document(tmp_path, cleanup_api_docs):
+    """검증 실패는 stage 에서 끝나므로 기존 게시물을 교체하지 않는다."""
+    c = _uploader_client()
+    fields = {"doc_type": "apitest", "name": "apiatomic", "version": "1"}
+    first = c.post(
+        "/api/v1/documents",
+        data=fields,
+        files={"file": ("report.html", HTML, "text/html")},
+    )
+    assert first.status_code == 201, first.text
+    dest = cleanup_api_docs / "apiatomic_v1" / "index.html"
+    assert dest.read_bytes() == HTML
+
+    invalid = _make_zip(tmp_path / "invalid.zip", {"LICENSE.txt": b"license"})
+    with invalid.open("rb") as fh:
+        second = c.post(
+            "/api/v1/documents",
+            data={**fields, "overwrite": "1"},
+            files={"file": ("bundle.zip", fh, "application/zip")},
+        )
+    assert second.status_code == 422, second.text
+    assert dest.read_bytes() == HTML
 
 
 def test_api_documents_normalizes_echo(cleanup_api_docs):
